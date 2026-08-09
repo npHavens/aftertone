@@ -15,6 +15,7 @@
 - **Frontend is Next.js 16 / React 19 — not the version in your training data.** Before writing any frontend code, read the relevant guide under `node_modules/next/dist/docs/01-app/` and heed deprecation notices (per repo `AGENTS.md`).
 - **No agent framework.** Backend is plain FastAPI + `google-genai`. Do not introduce ADK or LangChain.
 - **Model name is env-configurable:** `GEMINI_MODEL`, default `gemini-3.1-flash-lite`. Confirm the exact model id in Vertex Model Garden at implementation time; never hardcode it in call sites.
+- **Vertex/Gemini auth is ADC / managed identity — never an API key.** The client runs in Vertex mode (`vertexai=True`, project + location) and picks up Application Default Credentials automatically. Local dev: `gcloud auth application-default login`. Cloud Run: the attached service account with `roles/aiplatform.user`. Do **not** add a `GOOGLE_API_KEY` / `GEMINI_API_KEY` env var or a service-account key file; if one is present, the client would silently switch modes — keep config free of it.
 - **No database in v1.** The provider credential lives only in a signed, `httpOnly`, short-TTL session cookie. Nothing is persisted server-side.
 - **Secrets** (Spotify client secret, Apple `.p8` key + key/team IDs, session-signing secret) come from env, sourced from Secret Manager in production. Never commit them.
 - **Login-first:** every data endpoint (`/api/recognize`, `/api/albums/*`, `/api/playlist`) requires a valid session; return `401` otherwise.

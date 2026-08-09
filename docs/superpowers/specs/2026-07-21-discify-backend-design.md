@@ -89,7 +89,7 @@ After either flow, the credential is placed in a single signed session cookie, s
 5. `provider.resolve_album(artist, title)` searches the logged-in service's catalog and returns the canonical album (tracklist, durations, cover art).
 6. Compute a blended `confidence` (see §8) and return an `Album` in the existing `types/index.ts` shape plus `confidence` and `source`.
 
-Vertex authentication uses the Cloud Run service account via Application Default Credentials — no key file.
+Vertex authentication uses **Application Default Credentials (ADC)** — managed identity, never an API key. The `google-genai` client runs in Vertex mode (`vertexai=True`, project + location), so it picks up ADC automatically: the attached **service account** on Cloud Run, and `gcloud auth application-default login` for local development. No API key and no service-account key file are used anywhere.
 
 ## 7. `PlaylistProvider` interface
 
@@ -169,7 +169,7 @@ Backend-internal DTOs: `AuthKickoff`, `Session`, `TrackId`, `PlaylistResult`, `R
 
 ## 12. Security & secrets
 
-- Vertex: Cloud Run service-account ADC (no key file).
+- Vertex/Gemini: **ADC / managed identity only — never an API key.** Cloud Run uses its attached service account (grant `roles/aiplatform.user`); local dev uses `gcloud auth application-default login`. No `GOOGLE_API_KEY` / `GEMINI_API_KEY` env var exists.
 - Spotify client secret, Apple `.p8` private key (+ key/team IDs) → **Secret Manager**, injected as env.
 - Session cookie (either provider): signed, `httpOnly`, short TTL. No server-side token storage.
 - CORS restricted to the frontend origin. OAuth redirect URIs pinned to that origin.
