@@ -14,7 +14,7 @@ export function useCDScanner(
   const usedAlbumIds = useRef(new Set<string>());
 
   const processNext = useCallback(
-    async (queue: ScannedCD[]) => {
+    async function processQueue(queue: ScannedCD[]) {
       const pending = queue.filter((cd) => cd.status === 'pending');
       const slots = MAX_CONCURRENT - activeCount.current;
 
@@ -36,7 +36,7 @@ export function useCDScanner(
             const current = getScannedCDs();
             const stillPending = current.filter((c) => c.status === 'pending');
             if (stillPending.length > 0 && activeCount.current < MAX_CONCURRENT) {
-              processNext(current);
+              processQueue(current);
             }
           });
       }
@@ -44,13 +44,9 @@ export function useCDScanner(
     [getScannedCDs, updateCD],
   );
 
-  const startScanning = useCallback(
-    (newCDs: ScannedCD[]) => {
-      const current = getScannedCDs();
-      processNext([...current, ...newCDs]);
-    },
-    [getScannedCDs, processNext],
-  );
+  const startScanning = useCallback(() => {
+    processNext(getScannedCDs());
+  }, [getScannedCDs, processNext]);
 
   return { startScanning };
 }

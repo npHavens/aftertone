@@ -1,0 +1,25 @@
+node_modules/
+.claude/
+.codex/
+.agents/
+.local/
+.next/
+out/
+build/
+coverage/
+test-results/
+playwright-report/
+backend/.venv/
+backend/.local/
+backend/.data/
+backend/uv.lock
+**/.ruff_cache/
+**/.pytest_cache/
+public/fonts/
+public/brand/
+package-lock.json
+next-env.d.ts
+*.tsbuildinfo
+# Historical/user-maintained notes are not rewritten by format commands.
+CLAUDE.md
+docs/superpowers/
