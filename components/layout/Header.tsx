@@ -4,11 +4,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
-        <svg
-          viewBox="0 0 24 24"
-          className="h-7 w-7 text-amber-500"
-          fill="currentColor"
-        >
+        <svg viewBox="0 0 24 24" className="h-7 w-7 text-amber-500" fill="currentColor">
           <circle cx="12" cy="12" r="10" opacity="0.15" />
           <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.5" />
           <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />

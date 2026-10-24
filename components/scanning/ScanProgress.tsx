@@ -18,7 +18,8 @@ export function ScanProgress() {
 
       {/* Scanning text with dots */}
       <p className="text-xs font-medium text-zinc-400">
-        Identifying album<span className="scan-dots" />
+        Identifying album
+        <span className="scan-dots" />
       </p>
 
       {/* Progress bar */}

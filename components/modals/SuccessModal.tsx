@@ -11,7 +11,13 @@ interface SuccessModalProps {
   onAddMore: () => void;
 }
 
-export function SuccessModal({ service, albumCount, trackCount, onDone, onAddMore }: SuccessModalProps) {
+export function SuccessModal({
+  service,
+  albumCount,
+  trackCount,
+  onDone,
+  onAddMore,
+}: SuccessModalProps) {
   useEffect(() => {
     let confetti: typeof import('canvas-confetti') | null = null;
     const timer = setTimeout(async () => {
@@ -43,7 +49,13 @@ export function SuccessModal({ service, albumCount, trackCount, onDone, onAddMor
           className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
           style={{ backgroundColor: `${accentColor}20`, border: `2px solid ${accentColor}` }}
         >
-          <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke={accentColor} strokeWidth="2.5">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-8 w-8"
+            fill="none"
+            stroke={accentColor}
+            strokeWidth="2.5"
+          >
             <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
@@ -56,8 +68,10 @@ export function SuccessModal({ service, albumCount, trackCount, onDone, onAddMor
         </h2>
 
         <p className="mt-2 text-center text-sm text-zinc-400">
-          <span className="font-medium" style={{ color: accentColor }}>My CD Collection</span>
-          {' '}has been added to {serviceName} with{' '}
+          <span className="font-medium" style={{ color: accentColor }}>
+            My CD Collection
+          </span>{' '}
+          has been added to {serviceName} with{' '}
           <span className="text-zinc-200 font-medium">{albumCount} albums</span> and{' '}
           <span className="text-zinc-200 font-medium">{trackCount} tracks</span>.
         </p>

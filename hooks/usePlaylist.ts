@@ -23,16 +23,23 @@ const INITIAL_STATE: PlaylistState = {
 };
 
 export function usePlaylist() {
-  const [state, setState] = useState<PlaylistState>(INITIAL_STATE);
+  const [state, setReactState] = useState<PlaylistState>(INITIAL_STATE);
   const stateRef = useRef(state);
-  stateRef.current = state;
-
-  const updateCD = useCallback((id: string, patch: Partial<ScannedCD>) => {
-    setState((prev) => ({
-      ...prev,
-      scannedCDs: prev.scannedCDs.map((cd) => (cd.id === id ? { ...cd, ...patch } : cd)),
-    }));
+  const setState = useCallback((update: (previous: PlaylistState) => PlaylistState) => {
+    const next = update(stateRef.current);
+    stateRef.current = next;
+    setReactState(next);
   }, []);
+
+  const updateCD = useCallback(
+    (id: string, patch: Partial<ScannedCD>) => {
+      setState((prev) => ({
+        ...prev,
+        scannedCDs: prev.scannedCDs.map((cd) => (cd.id === id ? { ...cd, ...patch } : cd)),
+      }));
+    },
+    [setState],
+  );
 
   const getScannedCDs = useCallback(() => stateRef.current.scannedCDs, []);
 
@@ -45,36 +52,42 @@ export function usePlaylist() {
         ...prev,
         scannedCDs: [...prev.scannedCDs, ...newCDs],
       }));
-      startScanning(newCDs);
+      startScanning();
     },
-    [startScanning],
+    [startScanning, setState],
   );
 
-  const removeCD = useCallback((id: string) => {
-    setState((prev) => {
-      const cd = prev.scannedCDs.find((c) => c.id === id);
-      if (cd?.previewUrl) URL.revokeObjectURL(cd.previewUrl);
-      return {
-        ...prev,
-        scannedCDs: prev.scannedCDs.filter((c) => c.id !== id),
-      };
-    });
-  }, []);
+  const removeCD = useCallback(
+    (id: string) => {
+      setState((prev) => {
+        const cd = prev.scannedCDs.find((c) => c.id === id);
+        if (cd?.previewUrl) URL.revokeObjectURL(cd.previewUrl);
+        return {
+          ...prev,
+          scannedCDs: prev.scannedCDs.filter((c) => c.id !== id),
+        };
+      });
+    },
+    [setState],
+  );
 
-  const selectService = useCallback((service: StreamingService) => {
-    setState((prev) => ({ ...prev, selectedService: service }));
-  }, []);
+  const selectService = useCallback(
+    (service: StreamingService) => {
+      setState((prev) => ({ ...prev, selectedService: service }));
+    },
+    [setState],
+  );
 
   const createPlaylist = useCallback(() => {
     setState((prev) => ({ ...prev, isCreating: true }));
     setTimeout(() => {
       setState((prev) => ({ ...prev, isCreating: false, isSuccess: true }));
     }, 1500);
-  }, []);
+  }, [setState]);
 
   const dismissSuccess = useCallback(() => {
     setState((prev) => ({ ...prev, isSuccess: false }));
-  }, []);
+  }, [setState]);
 
   const reset = useCallback(() => {
     setState((prev) => {
@@ -83,7 +96,7 @@ export function usePlaylist() {
       });
       return INITIAL_STATE;
     });
-  }, []);
+  }, [setState]);
 
   const detectedAlbums = state.scannedCDs.filter((cd) => cd.status === 'done' && cd.album);
   const totalTracks = detectedAlbums.reduce((sum, cd) => sum + (cd.album?.tracks.length ?? 0), 0);
