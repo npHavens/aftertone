@@ -1,6 +1,6 @@
 # Aftertone local progress
 
-Updated September 8, 2026. Work remains local, with no deployment or cloud provisioning.
+Updated October 25, 2026. Work remains local, with no deployment or cloud provisioning.
 
 ## Implemented
 
@@ -14,11 +14,11 @@ Updated September 8, 2026. Work remains local, with no deployment or cloud provi
 
 ## Account setup needed for live acceptance testing
 
-These do not block local development. No live authorization, Vertex inference or playlist creation has been claimed as verified.
+These do not block local development. No live provider authorization or playlist creation has been verified. Vertex recognition was verified once, as described below.
 
 - **Spotify:** local developer app/client ID and registered callback matching `backend/.env.example`; account access for authorization and a deliberate test playlist.
 - **Apple Music:** MusicKit developer signing key, team ID and key ID, plus browser authorization with the subscription account. A music subscription alone does not supply developer signing credentials.
-- **Gemini Pro:** local ADC, exact Pro model and region, and verified billing/model access in `interview-assistant-507123`. Keep `VERTEX_ACCESS_VERIFIED` disabled until those checks are complete.
+- **Gemini (verified October 25, 2026):** `gemini-4-argon` on `global` in `nhs-aftertone`, with local ADC as `nick@nohandstack.com` and `GOOGLE_CLOUD_QUOTA_PROJECT=nhs-aftertone`. Ownership, billing and API access were checked. One live request in the backend's recognition request shape identified a synthetic album cover. The `/api/recognize` route itself has not been exercised live, because it needs a connected provider.
 - **Session encryption:** persistent local `TOKEN_ENCRYPTION_KEY` before connecting providers. Keep all values in ignored local configuration.
 
 See [backend setup](../backend/README.md) for configuration and [the project README](../README.md) for commands.
@@ -32,7 +32,7 @@ See [backend setup](../backend/README.md) for configuration and [the project REA
 
 ## Local verification
 
-Latest checks: ESLint/Prettier/TypeScript and 16 frontend unit tests pass; Ruff and 25 backend tests pass; the local production build passes. Ten fixture browser tests cover both provider result formats, scan retry, correction, exclusions, polling, reload recovery and mobile layout. Upstream Python deprecation warnings and the Node test module-type warning remain.
+Latest checks: ESLint/Prettier/TypeScript and 16 frontend unit tests pass; Ruff and 31 backend tests pass; the local production build passes. Ten fixture browser tests cover both provider result formats, scan retry, correction, exclusions, polling, reload recovery and mobile layout. Upstream Python deprecation warnings and the Node test module-type warning remain.
 
 Run `npm run check`, `npm run check:backend`, and `npm run build`. For browser regressions, run the frontend at `http://127.0.0.1:3000` and then `npm run test:browser` (or set `AFTERTONE_TEST_ORIGIN`). Install Playwright Chromium if absent with `npx playwright install chromium`.
 

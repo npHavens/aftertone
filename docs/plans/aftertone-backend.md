@@ -39,6 +39,8 @@ Browser API requests stay under the frontend origin. The gateway forwards only a
 
 Local `gcloud config get-value project` returned `interview-assistant-507123`. This confirms local configuration only, not billing, model permissions, or quota. Use explicit `--project` flags rather than changing the global project.
 
+Update, October 25, 2026: Aftertone now uses the dedicated No Hands Stack project `nhs-aftertone` with `gemini-4-argon`. See `AGENTS.md`.
+
 Before implementation rollout:
 
 - Confirm this project is the intended shared project, its billing, Vertex API access, model/region availability and quotas.

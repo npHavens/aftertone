@@ -345,7 +345,6 @@ def create_app(settings=None):
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
                             response_schema=Identity,
-                            temperature=0,
                         ),
                     )
                 identity = Identity.model_validate_json(response.text)
