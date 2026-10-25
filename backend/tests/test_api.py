@@ -172,6 +172,29 @@ def test_preflight_failure_never_creates_playlist(setup):
     assert calls == ["GET"]
 
 
+VERIFIED_VERTEX = {
+    "project": "nhs-aftertone",
+    "location": "global",
+    "model": "gemini-4-argon",
+    "vertex_verified": True,
+}
+
+
+@pytest.mark.parametrize("model", ["gemini-4-argon", "gemini-3.1-pro-preview"])
+def test_recognition_uses_the_explicitly_configured_model(model):
+    settings = Settings(**{**VERIFIED_VERTEX, "model": model})
+    assert settings.capabilities()["recognition"] is True
+
+
+@pytest.mark.parametrize(
+    "incomplete",
+    [{"project": ""}, {"location": ""}, {"model": ""}, {"vertex_verified": False}],
+)
+def test_recognition_stays_off_until_vertex_is_fully_configured(incomplete):
+    settings = Settings(**{**VERIFIED_VERTEX, **incomplete})
+    assert settings.capabilities()["recognition"] is False
+
+
 def test_setup_gates_and_input_validation(setup):
     app, client = setup
     connect(app, client)

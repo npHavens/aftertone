@@ -62,11 +62,7 @@ class Settings:
             and self.redirect == self.origin + "/api/auth/spotify/callback",
             "appleMusic": key and all([self.apple_team, self.apple_key, self.apple_private_path]),
             "recognition": bool(
-                self.project
-                and self.location
-                and self.model
-                and "pro" in self.model.lower()
-                and self.vertex_verified
+                self.project and self.location and self.model and self.vertex_verified
             ),
         }
 
