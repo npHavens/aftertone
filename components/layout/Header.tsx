@@ -14,7 +14,7 @@ export function Header() {
           className="text-xl font-bold tracking-tight text-zinc-100"
           style={{ fontFamily: 'var(--font-playfair)' }}
         >
-          Discify
+          Aftertone
         </span>
         <span className="ml-1 text-xs text-zinc-500 font-medium tracking-widest uppercase">
           CD to Playlist

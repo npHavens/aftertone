@@ -2,7 +2,7 @@
 
 **Your music, rediscovered.** A local music-playlist app with warm retro colors and blocky computer typography. Connect Spotify or Apple Music, add album photos, review the matches, and create a playlist. AI-generated playlists are a future feature.
 
-The repository/package name remains `discify`. Nothing is deployed or provisioned by this implementation.
+Formerly named Discify. Nothing is deployed or provisioned by this implementation.
 
 ## Local development
 
