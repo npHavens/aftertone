@@ -7,7 +7,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Aftertone
 
-Aftertone is the chosen product name. The repository/package is still named `discify`; do not rename infrastructure or package identifiers as a side effect of UI work. Tagline: **Your music, rediscovered.**
+Aftertone is the product, repository (`npHavens/aftertone`) and package name. It was renamed from Discify in October 2026; some local checkouts still live in a folder named `discify`. Tagline: **Your music, rediscovered.**
 
 ## Product direction and plans
 
