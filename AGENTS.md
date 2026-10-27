@@ -53,3 +53,31 @@ Aftertone is the product, repository (`npHavens/aftertone`) and package name. It
 - Report frontend gateway tests, backend tests, browser checks and live-provider checks separately.
 - For implementation, add focused tests for auth/session boundaries, recognition validation, cancellation, provider failures, and duplicate prevention. Add browser coverage of both complete provider flows.
 - Documentation-only changes need link/consistency checks, not an application build. Report exactly what was verified and any live integrations not exercised.
+
+## Code Review Rules
+
+### Review standard
+
+- Review this as a codebase that will be handed to a team, not a personal script repo. Missing tests for changed behavior, misleading comments, duplicated logic, dead code and speculative abstractions are findings, not nits.
+- Report every finding you can tie to a concrete trigger and consequence; don't stop at the worst one.
+- Leave formatting and lint to tooling.
+
+### Playlist publishing
+
+- Flag any change that could create a duplicate playlist, add the same tracks twice, or report a success the music service did not confirm. Users cannot easily undo a stray playlist in their library.
+- Safe path: record the publish before the first provider write. Reusing an idempotency key returns the same operation, and a changed payload under that key is rejected. After a timeout, dropped connection or partial write the outcome is unknown, so show it as needing attention and never retry or replay it automatically. Only a definite rejection before any write succeeded unlocks the draft. Rate limits and outages surface to the user as retryable; no automatic retry loops.
+
+### Credentials and secrets
+
+- This repository is public. Flag any path that exposes a provider token, the Apple signing key, the session encryption key or a `.env` value: committed to git (including fixtures and docs), returned to the browser, placed in `NEXT_PUBLIC_*` variables or browser storage, written to logs or error messages, or stored unencrypted. The browser holds only an opaque HttpOnly session cookie.
+- Exception: MusicKit's short-lived developer token, and the one-time handoff of the Music User Token through the CSRF-protected connect request, are part of the MusicKit design. Example files record variable names, never real values.
+
+### Recognition is a proposal
+
+- Flag any path that puts a model's guess into a playlist before the user confirms the match, or that replaces failed or unconfigured recognition with demo, random or cached albums. Also flag a default model or a silent fallback to a cheaper tier or another AI vendor.
+- Gemini sees only the user's photo. Flag sending Spotify or Apple Music catalog data into a prompt; Spotify's developer policy forbids feeding its content to AI models.
+- Safe path: an unrecognized or unconfigured photo goes to manual catalog search.
+
+### v1 scope
+
+- Flag any working control, endpoint or background job for AI-generated or prompt-described playlists. It is a future feature; v1 is album photos to confirmed matches to a playlist. Copy that describes it as coming later is fine.
