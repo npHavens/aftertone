@@ -6,6 +6,7 @@ import {
   publishStorageKey,
   readPendingPublish,
   readPlaylistOperation,
+  requestTimeoutMs,
   type PendingPublish,
 } from '@/lib/publish-recovery';
 import type { PlaylistOperation, Session } from '@/types';
@@ -71,7 +72,7 @@ export function usePublishOperation(session: Session | null) {
       request.current = controller;
       setBusy(true);
       setMessage('');
-      const timeout = window.setTimeout(() => controller.abort(), 20000);
+      const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs(value));
       try {
         const result = value.operation
           ? await api<PlaylistOperation>(
@@ -101,8 +102,11 @@ export function usePublishOperation(session: Session | null) {
           save(null);
           setMessage(`${errorMessage(error)} Your draft is ready to edit.`);
         } else {
+          const reason = controller.signal.aborted
+            ? 'The music service is taking longer than expected.'
+            : errorMessage(error);
           setMessage(
-            `${errorMessage(error)} The outcome is not confirmed. Check the same request before making another playlist.`,
+            `${reason} The outcome is not confirmed. Check the same request before making another playlist.`,
           );
         }
       } finally {

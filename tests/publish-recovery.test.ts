@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   definitiveRejection,
+  publishTimeoutMs,
   readPendingPublish,
   readPlaylistOperation,
+  requestTimeoutMs,
 } from '../lib/publish-recovery.ts';
 
 const saved = {
@@ -62,4 +64,20 @@ test('unreadable success responses are not accepted as a confirmed operation', (
   }
   const operation = { id: 'op-1', status: 'completed', addedCount: 2 };
   assert.deepEqual(readPlaylistOperation(operation), operation);
+});
+
+test('publish waits longer for larger playlists but stays under the gateway limit', () => {
+  const body = (count: number) =>
+    JSON.stringify({ name: 'Mix', trackIds: Array.from({ length: count }, (_, i) => `t${i}`) });
+  assert.equal(publishTimeoutMs(body(1)), 20_150);
+  assert.ok(publishTimeoutMs(body(200)) > publishTimeoutMs(body(20)));
+  assert.equal(publishTimeoutMs(body(2000)), 110_000);
+  assert.equal(publishTimeoutMs('not json'), 20_000);
+});
+
+test('status checks of a known operation keep the short timeout', () => {
+  const operation = { id: 'op-1', status: 'processing' as const, addedCount: 0 };
+  const largeDraft = JSON.stringify({ name: 'Mix', trackIds: Array(500).fill('t') });
+  assert.equal(requestTimeoutMs({ ...saved, body: largeDraft, operation }), 20_000);
+  assert.ok(requestTimeoutMs({ ...saved, body: largeDraft }) > 20_000);
 });

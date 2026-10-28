@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { chromium, type Browser, type Page, type Route } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
 
 const origin = process.env.AFTERTONE_TEST_ORIGIN ?? 'http://127.0.0.1:3000';
 const photo = {
@@ -37,11 +37,44 @@ function album(service = 'spotify') {
   };
 }
 
+// Stands in for Apple's MusicKit script, so tests never load it from Apple's CDN.
+const musicKitStub = `
+window.MusicKit = {
+  configure: async (config) => { window.musicKitConfig = config; },
+  getInstance: () => ({
+    authorize: async () => 'test-music-user-token',
+    unauthorize: async () => {},
+  }),
+};`;
+const developerTokenConfig = {
+  developerToken: 'test-developer-token',
+  app: { name: 'Aftertone', build: '1' },
+};
+
+async function newTestContext(): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  await context.route('https://js-cdn.music.apple.com/**', (route) =>
+    route.fulfill({ contentType: 'text/javascript', body: musicKitStub }),
+  );
+  return context;
+}
+
+function sessionJson(service: string | null) {
+  return {
+    authenticated: !!service,
+    service,
+    sessionScope: 'test-session',
+    csrfToken: 'test-csrf',
+    capabilities: { spotify: true, appleMusic: true, recognition: true },
+    setupRequired: [],
+  };
+}
+
 async function fixturePage(
   overrides: (route: Route, path: string) => Promise<boolean>,
   service = 'spotify',
 ) {
-  const context = await browser.newContext();
+  const context = await newTestContext();
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
   // All API traffic is intercepted. These tests cannot write to a user's music account.
@@ -49,16 +82,9 @@ async function fixturePage(
     const path = new URL(route.request().url()).pathname;
     if (await overrides(route, path)) return;
     if (path === '/api/session') {
-      await route.fulfill({
-        json: {
-          authenticated: true,
-          service,
-          sessionScope: 'test-session',
-          csrfToken: 'test-csrf',
-          capabilities: { spotify: true, appleMusic: false, recognition: true },
-          setupRequired: [],
-        },
-      });
+      await route.fulfill({ json: sessionJson(service) });
+    } else if (path === '/api/auth/apple/developer-token') {
+      await route.fulfill({ json: developerTokenConfig });
     } else if (path === '/api/recognize') {
       await route.fulfill({
         json: {
@@ -343,6 +369,89 @@ test('mobile track selection submits only included tracks without horizontal ove
     await page.getByRole('button', { name: 'Make my playlist' }).click();
     await page.getByRole('heading', { name: 'Back in rotation.' }).waitFor();
     assert.deepEqual(selected, ['track1']);
+  } finally {
+    await context.close();
+  }
+});
+
+type SignInState = { service: string | null };
+
+async function signedOutPage(
+  handle: (route: Route, path: string, state: SignInState) => Promise<boolean>,
+) {
+  const context = await newTestContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(7000);
+  const state: SignInState = { service: null };
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (await handle(route, path, state)) return;
+    if (path === '/api/session') {
+      await route.fulfill({ json: sessionJson(state.service) });
+    } else if (path === '/api/auth/apple/developer-token') {
+      await route.fulfill({ json: developerTokenConfig });
+    } else {
+      await route.fulfill({
+        status: 500,
+        json: { code: 'unexpected_test_request', message: path },
+      });
+    }
+  });
+  await page.goto(origin);
+  return { page, context };
+}
+
+function spotifyReturn(outcome: string) {
+  return async (route: Route, path: string, state: SignInState) => {
+    if (path !== '/api/auth/spotify/login') return false;
+    if (outcome === 'connected=spotify') state.service = 'spotify';
+    await route.fulfill({ status: 302, headers: { location: `${origin}/?${outcome}` } });
+    return true;
+  };
+}
+
+test('spotify: connecting from a signed-out session returns to the connected app', async () => {
+  const { page, context } = await signedOutPage(spotifyReturn('connected=spotify'));
+  try {
+    await page.getByRole('button', { name: 'Connect Spotify' }).click();
+    await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
+    assert.match(page.url(), /connected=spotify/);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a cancelled Spotify connection explains what happened', async () => {
+  const { page, context } = await signedOutPage(spotifyReturn('connection=cancelled'));
+  try {
+    await page.getByRole('button', { name: 'Connect Spotify' }).click();
+    await page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Connect Spotify' }).isEnabled(), true);
+  } finally {
+    await context.close();
+  }
+});
+
+test('apple-music: connecting hands the MusicKit token to the server', async () => {
+  let grant: unknown = null;
+  let csrfHeader: string | undefined;
+  const { page, context } = await signedOutPage(async (route, path, state) => {
+    if (path !== '/api/auth/apple/session') return false;
+    grant = route.request().postDataJSON();
+    csrfHeader = route.request().headers()['x-csrf-token'];
+    state.service = 'apple-music';
+    await route.fulfill({ json: { authenticated: true, service: 'apple-music' } });
+    return true;
+  });
+  try {
+    await page.getByRole('button', { name: 'Connect Apple Music' }).click();
+    await page.getByText("You're connected to Apple Music.", { exact: false }).waitFor();
+    assert.deepEqual(grant, { musicUserToken: 'test-music-user-token' });
+    assert.equal(csrfHeader, 'test-csrf');
+    const configured = await page.evaluate(
+      () => (window as unknown as { musicKitConfig: unknown }).musicKitConfig,
+    );
+    assert.deepEqual(configured, developerTokenConfig);
   } finally {
     await context.close();
   }
