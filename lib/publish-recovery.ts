@@ -8,6 +8,31 @@ export interface PendingPublish {
   operation: PlaylistOperation | null;
 }
 
+const STATUS_CHECK_TIMEOUT_MS = 20_000;
+const PUBLISH_TIMEOUT_PER_TRACK_MS = 150;
+// Stay below the local gateway's 120-second upstream limit.
+const MAX_PUBLISH_TIMEOUT_MS = 110_000;
+
+// The backend checks every track before its first write, so a larger playlist needs
+// longer before the browser stops waiting for the publish response.
+export function publishTimeoutMs(body: string): number {
+  let trackCount = 0;
+  try {
+    const draft = JSON.parse(body) as { trackIds?: unknown };
+    if (Array.isArray(draft.trackIds)) trackCount = draft.trackIds.length;
+  } catch {
+    trackCount = 0;
+  }
+  return Math.min(
+    MAX_PUBLISH_TIMEOUT_MS,
+    STATUS_CHECK_TIMEOUT_MS + trackCount * PUBLISH_TIMEOUT_PER_TRACK_MS,
+  );
+}
+
+export function requestTimeoutMs(pending: PendingPublish): number {
+  return pending.operation ? STATUS_CHECK_TIMEOUT_MS : publishTimeoutMs(pending.body);
+}
+
 export function definitiveRejection(status: number, previouslyUncertain: boolean): boolean {
   return (
     !previouslyUncertain &&
