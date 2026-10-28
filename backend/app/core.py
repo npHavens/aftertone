@@ -116,8 +116,11 @@ class Store:
     def get(self, raw):
         if not raw:
             return None
+        return self.get_by_id(self.digest(raw))
+
+    def get_by_id(self, sid):
         row = self.db.execute(
-            "SELECT * FROM sessions WHERE id=? AND expires>?", (self.digest(raw), time.time())
+            "SELECT * FROM sessions WHERE id=? AND expires>?", (sid, time.time())
         ).fetchone()
         if not row:
             return None
@@ -162,9 +165,10 @@ class Store:
                     )
                 self.db.execute("COMMIT")
                 return json.loads(existing["data"]), False
+            # Outlive the owner session, so a live session can always re-check its publish.
             self.db.execute(
                 "INSERT INTO operations VALUES (?,?,?,?,?,?)",
-                (op["id"], owner, idem, digest, time.time() + 86400, json.dumps(op)),
+                (op["id"], owner, idem, digest, time.time() + self.settings.ttl, json.dumps(op)),
             )
             self.db.execute("COMMIT")
             return op, True
@@ -173,5 +177,29 @@ class Store:
                 self.db.execute("ROLLBACK")
             raise
 
+    def get_operation(self, op_id, owner):
+        row = self.db.execute(
+            "SELECT data FROM operations WHERE id=? AND owner=? AND expires>?",
+            (op_id, owner, time.time()),
+        ).fetchone()
+        return json.loads(row["data"]) if row else None
+
     def save_operation(self, op):
         self.db.execute("UPDATE operations SET data=? WHERE id=?", (json.dumps(op), op["id"]))
+
+
+class RateLimiter:
+    def __init__(self, window=60):
+        self.window = window
+        self.hits = {}
+
+    def hit(self, key, maximum, now=None):
+        now = time.time() if now is None else now
+        # Drop keys whose newest hit left the window, so abandoned sessions don't accumulate.
+        self.hits = {k: times for k, times in self.hits.items() if now - times[-1] < self.window}
+        recent = [t for t in self.hits.get(key, []) if now - t < self.window]
+        if len(recent) >= maximum:
+            raise Problem(
+                "rate_limited", "Too many requests. Wait a minute and try again.", 429, True
+            )
+        self.hits[key] = recent + [now]
