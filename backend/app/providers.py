@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 import time
 from pathlib import Path
@@ -12,35 +11,68 @@ import jwt
 
 from .core import Problem
 
+# Spotify Development Mode has no batch track lookup, so preflight checks a few tracks at a time.
+VALIDATION_CONCURRENCY = 8
+APPLE_TOKEN_LIFETIME = 3600
+UNCERTAIN_PUBLISH = (
+    "Publishing may have partially succeeded. Check your music library before trying a new "
+    "publish. This operation will not replay any writes."
+)
+PREFLIGHT_FAILED = (
+    "Track checks failed before anything was written. Review your selection and try again."
+)
+
+
+def unavailable_track():
+    return Problem("unavailable_track", "A selected track is unavailable. Review your selection.")
+
+
+def spotify_track_available(track, track_id):
+    if track.get("is_playable") is False or track.get("restrictions"):
+        return False
+    same_track = (
+        track.get("id") == track_id or (track.get("linked_from") or {}).get("id") == track_id
+    )
+    # Spotify may relink to a playable equivalent in the user's market. Development Mode
+    # responses no longer include linked_from, so is_playable is the remaining signal.
+    return same_track or track.get("is_playable") is True
+
 
 class Providers:
     def __init__(self, settings, store):
         self.settings, self.store = settings, store
         self.http = httpx.AsyncClient(timeout=30, follow_redirects=False)
         self.refresh_lock = asyncio.Lock()
+        self.apple_tokens = {}
 
-    def developer_token(self):
+    def developer_token(self, browser=False):
         if not self.settings.capabilities()["appleMusic"]:
             raise Problem(
                 "setup_required",
                 "Configure Apple Music developer credentials and server encryption key.",
                 503,
             )
+        audience = "browser" if browser else "server"
+        cached = self.apple_tokens.get(audience)
+        if cached and cached["expires"] - 300 > time.time():
+            return cached["token"]
+        now = int(time.time())
+        claims = {"iss": self.settings.apple_team, "iat": now, "exp": now + APPLE_TOKEN_LIFETIME}
+        if browser:
+            # MusicKit's token is limited to this app. Server calls send no Origin header,
+            # so they use an unrestricted token that never reaches the browser.
+            claims["origin"] = [self.settings.origin]
         try:
-            now = int(time.time())
-            return jwt.encode(
-                {
-                    "iss": self.settings.apple_team,
-                    "iat": now,
-                    "exp": now + 3600,
-                    "origin": self.settings.origin,
-                },
+            token = jwt.encode(
+                claims,
                 Path(self.settings.apple_private_path).read_text(),
                 algorithm="ES256",
                 headers={"kid": self.settings.apple_key},
             )
         except Exception:
             raise Problem("setup_required", "Apple Music signing key could not be loaded.", 503)
+        self.apple_tokens[audience] = {"token": token, "expires": now + APPLE_TOKEN_LIFETIME}
+        return token
 
     async def send(self, method, url, **kwargs):
         try:
@@ -80,30 +112,20 @@ class Providers:
         except ValueError:
             raise Problem("provider_error", "The music service returned an invalid response.", 502)
 
-    async def request(self, session, method, path, **kwargs):
-        active = self.store.db.execute(
-            "SELECT id FROM sessions WHERE id=? AND expires>?",
-            (session["id"], time.time()),
-        ).fetchone()
-        if not active:
+    def current_data(self, session):
+        current = self.store.get_by_id(session["id"])
+        if not current:
             raise Problem(
                 "unauthenticated", "Your session expired. Reconnect your music service.", 401
             )
-        data = session["data"]
-        if data["service"] == "spotify":
+        session["data"] = current["data"]
+        return current["data"]
+
+    async def request(self, session, method, path, **kwargs):
+        if session["data"]["service"] == "spotify":
             async with self.refresh_lock:
-                current = self.store.db.execute(
-                    "SELECT data FROM sessions WHERE id=? AND expires>?",
-                    (session["id"], time.time()),
-                ).fetchone()
-                if not current:
-                    raise Problem(
-                        "unauthenticated",
-                        "Your session expired. Reconnect your music service.",
-                        401,
-                    )
-                data = json.loads(self.store.cipher.decrypt(current["data"].encode()))
-                session["data"] = data
+                # Re-read under the lock so concurrent calls see a token another call refreshed.
+                data = self.current_data(session)
                 if data.get("expires", 0) <= time.time() + 60:
                     try:
                         token = await self.send(
@@ -135,6 +157,7 @@ class Providers:
             base = "https://api.spotify.com/v1"
             headers = {"Authorization": "Bearer " + data["access_token"]}
         else:
+            data = self.current_data(session)
             base = "https://api.music.apple.com"
             headers = {
                 "Authorization": "Bearer " + self.developer_token(),
@@ -233,55 +256,55 @@ class Providers:
         raise Problem("provider_error", "Album track pagination exceeded the safety limit.", 502)
 
     async def validate_tracks(self, session, ids):
-        service = session["data"]["service"]
-        for track_id in ids:
-            if service == "spotify":
-                track = await self.request(session, "GET", "/tracks/" + track_id)
-                if (
-                    (
-                        track.get("id") != track_id
-                        and track.get("linked_from", {}).get("id") != track_id
-                    )
-                    or track.get("is_playable") is False
-                    or track.get("restrictions")
-                ):
-                    raise Problem(
-                        "unavailable_track",
-                        "A selected track is unavailable. Review your selection.",
-                    )
-            else:
-                result = await self.request(
-                    session,
-                    "GET",
-                    "/v1/catalog/" + session["data"]["storefront"] + "/songs/" + track_id,
-                )
-                if (
-                    not result.get("data")
-                    or result["data"][0].get("id") != track_id
-                    or result["data"][0].get("type") != "songs"
-                    or not result["data"][0].get("attributes", {}).get("playParams")
-                ):
-                    raise Problem(
-                        "unavailable_track",
-                        "A selected track is unavailable. Review your selection.",
-                    )
+        for start in range(0, len(ids), VALIDATION_CONCURRENCY):
+            batch = ids[start : start + VALIDATION_CONCURRENCY]
+            # Let every check in the batch settle before raising, so none is left running.
+            results = await asyncio.gather(
+                *(self.validate_track(session, track_id) for track_id in batch),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+
+    async def validate_track(self, session, track_id):
+        if session["data"]["service"] == "spotify":
+            # Without a market, Spotify omits is_playable and restrictions entirely.
+            track = await self.request(
+                session, "GET", "/tracks/" + track_id, params={"market": "from_token"}
+            )
+            if not spotify_track_available(track, track_id):
+                raise unavailable_track()
+            return
+        result = await self.request(
+            session,
+            "GET",
+            "/v1/catalog/" + session["data"]["storefront"] + "/songs/" + track_id,
+        )
+        if (
+            not result.get("data")
+            or result["data"][0].get("id") != track_id
+            or result["data"][0].get("type") != "songs"
+            or not result["data"][0].get("attributes", {}).get("playParams")
+        ):
+            raise unavailable_track()
+
+    def finish(self, op, **changes):
+        op.update(changes)
+        self.store.save_operation(op)
+        return op
 
     async def publish(self, session, op, payload):
-        # Preflight is read-only; only definitive rejected writes may unlock a draft.
+        # Preflight is read-only, so any failure here is definitive and unlocks the draft.
         try:
             await self.validate_tracks(session, payload["trackIds"])
         except Problem as error:
-            op.update(status="failed", message=error.message, code=error.code)
-            self.store.save_operation(op)
-            return op
-        except (KeyError, IndexError, TypeError, AttributeError):
-            op.update(
-                status="failed",
-                code="provider_error",
-                message="The music service returned invalid track details. Review your selection and try again.",
-            )
-            self.store.save_operation(op)
-            return op
+            return self.finish(op, status="failed", message=error.message, code=error.code)
+        except asyncio.CancelledError:
+            self.finish(op, status="failed", code="cancelled", message=PREFLIGHT_FAILED)
+            raise
+        except Exception:
+            return self.finish(op, status="failed", code="provider_error", message=PREFLIGHT_FAILED)
         service = session["data"]["service"]
         try:
             if service == "spotify":
@@ -338,15 +361,13 @@ class Providers:
             ):
                 op.update(status="failed", message=error.message, code=error.code)
             else:
-                op.update(
-                    status="needs_attention",
-                    message="Publishing may have partially succeeded. Check your music library before trying a new publish. This operation will not replay any writes.",
-                )
-        except (KeyError, IndexError, TypeError, AttributeError):
-            op.update(
-                status="needs_attention",
-                message="Publishing may have partially succeeded. Check your music library before trying a new publish. This operation will not replay any writes.",
-            )
+                op.update(status="needs_attention", message=UNCERTAIN_PUBLISH)
+        except asyncio.CancelledError:
+            op.update(status="needs_attention", message=UNCERTAIN_PUBLISH)
+            raise
+        except Exception:
+            # Any other error may have followed a write, so the outcome is unknown.
+            op.update(status="needs_attention", message=UNCERTAIN_PUBLISH)
         finally:
             self.store.save_operation(op)
         return op

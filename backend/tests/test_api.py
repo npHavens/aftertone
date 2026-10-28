@@ -1,14 +1,22 @@
+import asyncio
 import io
 import time
+from types import SimpleNamespace
 
 import httpx
+import jwt
 import pytest
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
+from google import genai
 from PIL import Image
 
-from app.core import Settings
+from app.core import Problem, RateLimiter, Settings
 from app.main import COOKIE, create_app, normalize_image
+
+ORIGIN = "http://127.0.0.1:3000"
 
 
 @pytest.fixture
@@ -83,20 +91,91 @@ def test_oauth_state_is_one_use(setup):
     assert "code_challenge_method=S256" in response.headers["location"]
     session = app.state.store.get(client.cookies.get(COOKIE))
     state = session["data"]["oauth"]["state"]
-    assert (
-        client.get(
-            "/api/auth/spotify/callback",
-            params={"state": state, "error": "access_denied"},
-            follow_redirects=False,
-        ).status_code
-        == 307
+    cancelled = client.get(
+        "/api/auth/spotify/callback",
+        params={"state": state, "error": "access_denied"},
+        follow_redirects=False,
     )
-    assert (
-        client.get(
-            "/api/auth/spotify/callback", params={"state": state, "code": "unused"}
-        ).status_code
-        == 400
+    assert cancelled.headers["location"] == ORIGIN + "/?connection=cancelled"
+    reused = client.get(
+        "/api/auth/spotify/callback",
+        params={"state": state, "code": "unused"},
+        follow_redirects=False,
     )
+    assert reused.headers["location"] == ORIGIN + "/?connection=expired"
+
+
+def start_spotify_login(app, client):
+    client.get("/api/session")
+    client.get("/api/auth/spotify/login", follow_redirects=False)
+    return app.state.store.get(client.cookies.get(COOKIE))["data"]["oauth"]["state"]
+
+
+def test_spotify_callback_connects_without_exposing_tokens(setup):
+    app, client = setup
+    state = start_spotify_login(app, client)
+    anonymous_cookie = client.cookies.get(COOKIE)
+    exchanges = []
+
+    def upstream(request):
+        exchanges.append(dict(httpx.QueryParams(request.content.decode())))
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_ACCESS",
+                "refresh_token": "SECRET_REFRESH",
+                "expires_in": 3600,
+            },
+        )
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.get(
+        "/api/auth/spotify/callback",
+        params={"state": state, "code": "auth-code"},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == ORIGIN + "/?connected=spotify"
+    assert exchanges[0]["grant_type"] == "authorization_code"
+    assert exchanges[0]["code"] == "auth-code"
+    assert exchanges[0]["code_verifier"]
+    session = client.get("/api/session")
+    assert session.json()["authenticated"] is True
+    assert session.json()["service"] == "spotify"
+    assert "SECRET" not in response.text + session.text
+    assert app.state.store.get(anonymous_cookie) is None
+
+
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (400, {"error": "invalid_grant"}),
+        (200, {"access_token": "access", "expires_in": 3600}),
+        (200, {"access_token": "access", "refresh_token": "refresh"}),
+    ],
+)
+def test_spotify_callback_failures_return_to_the_app(setup, status, body):
+    app, client = setup
+    state = start_spotify_login(app, client)
+    app.state.providers.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body))
+    )
+    response = client.get(
+        "/api/auth/spotify/callback",
+        params={"state": state, "code": "auth-code"},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == ORIGIN + "/?connection=failed"
+    assert client.get("/api/session").json()["authenticated"] is False
+
+
+def test_spotify_callback_without_a_session_returns_to_the_app(setup):
+    _, client = setup
+    response = client.get(
+        "/api/auth/spotify/callback",
+        params={"state": "unknown", "code": "auth-code"},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == ORIGIN + "/?connection=expired"
 
 
 def test_images_reject_invalid_and_strip_metadata():
@@ -552,3 +631,337 @@ def test_malformed_creation_metadata_preserves_id_and_uncertainty(setup):
     assert response.json()["status"] == "needs_attention"
     assert response.json()["playlistId"] == "p1"
     assert calls == ["GET", "POST"]
+
+
+def spotify_writes(request):
+    if request.url.path == "/v1/me/playlists":
+        return httpx.Response(201, json={"id": "p1"})
+    return httpx.Response(201, json={})
+
+
+@pytest.mark.parametrize(
+    "track_ids, expected",
+    [(["track1", "relinked"], "completed"), (["track1", "blocked"], "failed")],
+)
+def test_spotify_preflight_checks_playability_in_the_users_market(setup, track_ids, expected):
+    app, client = setup
+    connect(app, client)
+    markets = []
+    tracks = {
+        "relinked": {"id": "replacement", "is_playable": True},
+        "blocked": {"id": "blocked", "is_playable": False},
+    }
+
+    def upstream(request):
+        if request.method != "GET":
+            return spotify_writes(request)
+        markets.append(request.url.params.get("market"))
+        track_id = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=tracks.get(track_id, {"id": track_id, "is_playable": True}))
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.post(
+        "/api/playlists",
+        json={"name": "Test", "trackIds": track_ids},
+        headers={**csrf(client), "Idempotency-Key": "market-key-" + expected},
+    )
+    assert response.json()["status"] == expected
+    assert markets == ["from_token", "from_token"]
+
+
+def test_preflight_checks_tracks_concurrently_within_a_bound(setup):
+    app, client = setup
+    connect(app, client)
+    in_flight = peak = 0
+
+    async def upstream(request):
+        nonlocal in_flight, peak
+        if request.method != "GET":
+            return spotify_writes(request)
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return httpx.Response(200, json={"id": request.url.path.rsplit("/", 1)[-1]})
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.post(
+        "/api/playlists",
+        json={"name": "Test", "trackIds": [f"track{i}" for i in range(20)]},
+        headers={**csrf(client), "Idempotency-Key": "concurrent-key"},
+    )
+    assert response.json()["status"] == "completed"
+    assert 1 < peak <= 8
+
+
+@pytest.mark.parametrize("phase, expected", [("preflight", "failed"), ("write", "needs_attention")])
+def test_unexpected_errors_never_leave_a_publish_processing(setup, phase, expected):
+    app, client = setup
+    connect(app, client)
+
+    def upstream(request):
+        if request.method == "GET" and phase != "preflight":
+            return httpx.Response(200, json={"id": "track1"})
+        if request.url.path == "/v1/me/playlists":
+            return httpx.Response(201, json={"id": "p1"})
+        raise RuntimeError("unexpected upstream failure")
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.post(
+        "/api/playlists",
+        json={"name": "Test", "trackIds": ["track1"]},
+        headers={**csrf(client), "Idempotency-Key": "unexpected-" + phase},
+    )
+    assert response.json()["status"] == expected
+    stored = client.get("/api/playlist-operations/" + response.json()["id"]).json()
+    assert stored["status"] == expected
+
+
+def test_publish_record_lasts_as_long_as_the_session(tmp_path, monkeypatch):
+    settings = Settings(
+        store_path=str(tmp_path / "store.sqlite3"),
+        encryption_key=Fernet.generate_key().decode(),
+        spotify_id="test",
+        ttl=3 * 86400,
+    )
+    with TestClient(create_app(settings)) as client:
+        session = connect(client.app, client)
+        op, _ = client.app.state.store.begin_operation(
+            session["id"], "long-session-key", {"name": "Test", "trackIds": ["track1"]}
+        )
+        two_days_later = time.time() + 2 * 86400
+        monkeypatch.setattr(time, "time", lambda: two_days_later)
+        assert client.get("/api/playlist-operations/" + op["id"]).json()["id"] == op["id"]
+
+
+def test_rate_limiter_enforces_the_window_and_drops_stale_keys():
+    limiter = RateLimiter(window=60)
+    limiter.hit("abandoned", 2, now=0)
+    limiter.hit("active", 2, now=50)
+    limiter.hit("active", 2, now=55)
+    with pytest.raises(Problem):
+        limiter.hit("active", 2, now=59)
+    limiter.hit("other", 2, now=100)
+    assert set(limiter.hits) == {"active", "other"}
+    limiter.hit("other", 2, now=130)
+    assert set(limiter.hits) == {"other"}
+
+
+def apple_settings(tmp_path):
+    key = ec.generate_private_key(ec.SECP256R1())
+    key_path = tmp_path / "AuthKey_TEST.p8"
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    settings = Settings(
+        store_path=str(tmp_path / "store.sqlite3"),
+        encryption_key=Fernet.generate_key().decode(),
+        apple_team="TEAM123456",
+        apple_key="KEY1234567",
+        apple_private_path=str(key_path),
+    )
+    return settings, key_path
+
+
+def claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def test_apple_tokens_limit_the_browser_origin_and_are_reused(tmp_path):
+    settings, key_path = apple_settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        client.get("/api/session")
+        browser = client.get("/api/auth/apple/developer-token").json()["developerToken"]
+        providers = client.app.state.providers
+        server = providers.developer_token()
+        assert claims(browser)["origin"] == [ORIGIN]
+        assert "origin" not in claims(server)
+        key_path.unlink()
+        assert providers.developer_token() == server
+        assert providers.developer_token(browser=True) == browser
+
+
+def test_apple_connection_creates_a_session_with_the_server_token(tmp_path):
+    settings, _ = apple_settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        client.get("/api/session")
+        seen = []
+
+        def upstream(request):
+            seen.append(request)
+            return httpx.Response(200, json={"data": [{"id": "us"}]})
+
+        client.app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        response = client.post(
+            "/api/auth/apple/session",
+            json={"musicUserToken": "music-user-token-123456"},
+            headers=csrf(client),
+        )
+        assert response.json() == {"authenticated": True, "service": "apple-music"}
+        assert seen[0].url.path == "/v1/me/storefront"
+        assert seen[0].headers["music-user-token"] == "music-user-token-123456"
+        assert "origin" not in claims(seen[0].headers["authorization"].removeprefix("Bearer "))
+        session = client.get("/api/session")
+        assert session.json()["service"] == "apple-music"
+        assert "music-user-token" not in session.text
+
+
+def cover_photo():
+    output = io.BytesIO()
+    Image.new("RGB", (16, 16), "navy").save(output, "PNG")
+    return output.getvalue()
+
+
+def spotify_album(album_id, with_tracks=False):
+    album = {
+        "id": album_id,
+        "name": "Nevermind",
+        "artists": [{"name": "Nirvana"}],
+        "images": [],
+        "external_urls": {"spotify": "https://open.spotify.com/album/" + album_id},
+    }
+    if with_tracks:
+        album["tracks"] = {
+            "items": [
+                {
+                    "id": "track1",
+                    "name": "Smells Like Teen Spirit",
+                    "artists": [{"name": "Nirvana"}],
+                    "duration_ms": 301000,
+                    "external_urls": {},
+                }
+            ],
+            "next": None,
+        }
+    return album
+
+
+def catalog(album_response, searches=None):
+    def upstream(request):
+        if request.url.path == "/v1/search":
+            if searches is not None:
+                searches.append(request.url.params["q"])
+            items = [spotify_album("album1"), spotify_album("album2")]
+            return httpx.Response(200, json={"albums": {"items": items}})
+        return album_response(request)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+
+
+@pytest.fixture
+def recognition(tmp_path, monkeypatch):
+    settings = Settings(
+        store_path=str(tmp_path / "store.sqlite3"),
+        encryption_key=Fernet.generate_key().decode(),
+        spotify_id="test",
+        **VERIFIED_VERTEX,
+    )
+    model = SimpleNamespace(reply="", calls=[], clients=[])
+
+    class FakeModels:
+        async def generate_content(self, **request):
+            model.calls.append(request)
+            return SimpleNamespace(text=model.reply)
+
+    class FakeClient:
+        def __init__(self, **options):
+            model.clients.append(options)
+            self.aio = self
+
+        async def __aenter__(self):
+            return SimpleNamespace(models=FakeModels())
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    monkeypatch.setattr(genai, "Client", FakeClient)
+    with TestClient(create_app(settings)) as client:
+        connect(client.app, client)
+        yield client, model
+
+
+def recognize(client):
+    return client.post(
+        "/api/recognize",
+        files={"file": ("cover.png", cover_photo(), "image/png")},
+        data={"generation": "scan-1"},
+        headers=csrf(client),
+    )
+
+
+IDENTIFIED = '{"recognized": true, "artist": "Nirvana", "title": "Nevermind"}'
+
+
+def test_recognized_photo_returns_candidates_and_the_first_album(recognition):
+    client, model = recognition
+    model.reply = IDENTIFIED
+    searches = []
+    client.app.state.providers.http = catalog(
+        lambda request: httpx.Response(200, json=spotify_album("album1", with_tracks=True)),
+        searches,
+    )
+    body = recognize(client).json()
+    assert body["outcome"] == "needs_review"
+    assert [album["id"] for album in body["candidates"]] == ["album1", "album2"]
+    assert body["selected"]["tracks"][0]["id"] == "track1"
+    assert body["evidence"] == "Nirvana — Nevermind"
+    assert searches == ["Nirvana Nevermind"]
+    assert model.clients[0]["project"] == VERIFIED_VERTEX["project"]
+    assert model.calls[0]["model"] == "gemini-4-argon"
+    assert model.calls[0]["config"].temperature is None
+
+
+def test_unidentifiable_photo_skips_the_catalog(recognition):
+    client, model = recognition
+    model.reply = '{"recognized": false, "artist": "", "title": ""}'
+    catalog_calls = []
+    client.app.state.providers.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: catalog_calls.append(request))
+    )
+    body = recognize(client).json()
+    assert body["outcome"] == "unrecognized"
+    assert body["candidates"] == []
+    assert catalog_calls == []
+
+
+def test_invalid_model_output_is_a_retryable_recognition_failure(recognition):
+    client, model = recognition
+    model.reply = "not json"
+    response = recognize(client)
+    assert response.status_code == 502
+    assert response.json()["code"] == "recognition_unavailable"
+    assert response.json()["retryable"] is True
+
+
+@pytest.mark.parametrize(
+    "album_response",
+    [
+        lambda request: httpx.Response(404, json={"error": "not found"}),
+        lambda request: httpx.Response(200, json={"id": "album1"}),
+    ],
+    ids=["catalog-rejects-album", "malformed-album"],
+)
+def test_recognition_keeps_candidates_when_the_first_album_cannot_load(recognition, album_response):
+    client, model = recognition
+    model.reply = IDENTIFIED
+    client.app.state.providers.http = catalog(album_response)
+    response = recognize(client)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "needs_review"
+    assert [album["id"] for album in body["candidates"]] == ["album1", "album2"]
+    assert body["selected"] is None
+    assert body["evidence"] == "Nirvana — Nevermind"
+
+
+def test_recognition_asks_to_reconnect_when_authorization_expires_mid_lookup(recognition):
+    client, model = recognition
+    model.reply = IDENTIFIED
+    client.app.state.providers.http = catalog(lambda request: httpx.Response(401, json={}))
+    response = recognize(client)
+    assert response.status_code == 401
+    assert response.json()["code"] == "provider_authorization"

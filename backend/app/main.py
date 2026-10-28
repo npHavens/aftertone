@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hashlib
 import io
-import json
 import re
 import secrets
 import time
@@ -17,10 +16,11 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from .core import Problem, Settings, Store
+from .core import Problem, RateLimiter, Settings, Store
 from .providers import Providers
 
 COOKIE = "aftertone_session"
+RECONNECT_CODES = {"provider_authorization", "unauthenticated"}
 
 
 class AppleGrant(BaseModel):
@@ -62,7 +62,7 @@ def create_app(settings=None):
     store = None
     providers = None
     recognition_slots = asyncio.Semaphore(2)
-    limits = {}
+    limiter = RateLimiter()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -140,14 +140,10 @@ def create_app(settings=None):
         )
 
     def throttle(session, kind, maximum):
-        key = (session["id"], kind)
-        now = time.time()
-        entries = [t for t in limits.get(key, []) if now - t < 60]
-        if len(entries) >= maximum:
-            raise Problem(
-                "rate_limited", "Too many requests. Wait a minute and try again.", 429, True
-            )
-        limits[key] = entries + [now]
+        limiter.hit((session["id"], kind), maximum)
+
+    def connection_return(outcome):
+        return RedirectResponse(settings.origin + "/?connection=" + outcome)
 
     @app.get("/api/session")
     async def get_session(request: Request):
@@ -216,36 +212,39 @@ def create_app(settings=None):
 
     @app.get("/api/auth/spotify/callback")
     async def spotify_callback(request: Request, state: str = "", code: str = "", error: str = ""):
-        session = session_for(request, False)
-        oauth = session["data"].pop("oauth", {})
-        store.save(session)  # Consume state before exchanging the code.
+        # The browser arrives here by navigation, so every outcome returns to the app.
+        session = store.get(request.cookies.get(COOKIE))
+        oauth = session["data"].pop("oauth", {}) if session else {}
+        if session:
+            store.save(session)  # Consume state before exchanging the code.
         if (
             not state
             or not secrets.compare_digest(state, oauth.get("state", ""))
             or oauth.get("expires", 0) < time.time()
         ):
-            raise Problem(
-                "invalid_oauth_state", "This connection attempt expired. Start again.", 400
-            )
+            return connection_return("expired")
         if error or not code:
-            return RedirectResponse(settings.origin + "/?connection=cancelled")
-        token = await providers.send(
-            "POST",
-            "https://accounts.spotify.com/api/token",
-            data={
-                "grant_type": "authorization_code",
-                "client_id": settings.spotify_id,
-                "code": code,
-                "redirect_uri": settings.redirect,
-                "code_verifier": oauth["verifier"],
-            },
-        )
-        if not token.get("refresh_token"):
-            raise Problem(
-                "provider_authorization",
-                "Spotify did not provide a renewable authorization. Reconnect.",
-                401,
+            return connection_return("cancelled")
+        try:
+            token = await providers.send(
+                "POST",
+                "https://accounts.spotify.com/api/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": settings.spotify_id,
+                    "code": code,
+                    "redirect_uri": settings.redirect,
+                    "code_verifier": oauth["verifier"],
+                },
             )
+        except Problem:
+            return connection_return("failed")
+        if (
+            not token.get("access_token")
+            or not token.get("refresh_token")
+            or not isinstance(token.get("expires_in"), (int, float))
+        ):
+            return connection_return("failed")
         raw, new = store.create(
             {
                 "service": "spotify",
@@ -264,7 +263,7 @@ def create_app(settings=None):
         session = session_for(request, False)
         throttle(session, "connect", 10)
         return {
-            "developerToken": providers.developer_token(),
+            "developerToken": providers.developer_token(browser=True),
             "app": {"name": "Aftertone", "build": "1"},
         }
 
@@ -308,6 +307,21 @@ def create_app(settings=None):
     async def album(request: Request, album_id: str):
         return await providers.album(session_for(request), album_id)
 
+    async def preselect(session, candidates):
+        # Loading the top match only saves the user a click. If it fails, the model's
+        # identification and the other candidates still go to review. Authorization
+        # failures are raised, because every later catalog step would fail the same way.
+        if not candidates:
+            return None
+        try:
+            return await providers.album(session, candidates[0]["id"])
+        except Problem as error:
+            if error.code in RECONNECT_CODES:
+                raise
+            return None
+        except (KeyError, IndexError, TypeError, AttributeError):
+            return None
+
     @app.post("/api/recognize")
     async def recognize(
         request: Request, file: UploadFile = File(...), generation: str = Form("0")
@@ -316,7 +330,7 @@ def create_app(settings=None):
         if not settings.capabilities()["recognition"]:
             raise Problem(
                 "setup_required",
-                "Configure a verified Vertex project, location, exact Gemini Pro model and local ADC.",
+                "Configure a verified Vertex project, location, exact Gemini model and local ADC.",
                 503,
             )
         throttle(session, "recognition", 20)
@@ -362,7 +376,7 @@ def create_app(settings=None):
             if identity.recognized
             else []
         )
-        selected = await providers.album(session, candidates[0]["id"]) if candidates else None
+        selected = await preselect(session, candidates)
         return {
             "outcome": "needs_review" if candidates else "unrecognized",
             "candidates": candidates,
@@ -398,13 +412,10 @@ def create_app(settings=None):
     @app.get("/api/playlist-operations/{operation_id}")
     async def operation(request: Request, operation_id: str):
         session = session_for(request)
-        row = store.db.execute(
-            "SELECT data FROM operations WHERE id=? AND owner=? AND expires>?",
-            (operation_id, session["id"], time.time()),
-        ).fetchone()
-        if not row:
+        op = store.get_operation(operation_id, session["id"])
+        if not op:
             raise Problem("not_found", "Publish operation not found.", 404)
-        return json.loads(row["data"])
+        return op
 
     return app
 
