@@ -516,7 +516,15 @@ def test_album_tracks_include_next_page(setup, service):
                             "attributes": {"name": "Album"},
                             "relationships": {
                                 "tracks": {
-                                    "data": [{"id": "t1", "attributes": {"name": "First"}}],
+                                    "data": [
+                                        {
+                                            "id": "t1",
+                                            "attributes": {
+                                                "name": "First",
+                                                "playParams": {"id": "t1", "kind": "song"},
+                                            },
+                                        }
+                                    ],
                                     "next": "/v1/catalog/us/albums/album1/tracks?offset=1",
                                 }
                             },
@@ -524,7 +532,20 @@ def test_album_tracks_include_next_page(setup, service):
                     ]
                 },
             )
-        return httpx.Response(200, json={"data": [{"id": "t2", "attributes": {"name": "Second"}}]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "t2",
+                        "attributes": {
+                            "name": "Second",
+                            "playParams": {"id": "t2", "kind": "song"},
+                        },
+                    }
+                ]
+            },
+        )
 
     app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
     response = client.get("/api/albums/album1")
@@ -860,7 +881,7 @@ def recognition(tmp_path, monkeypatch):
         spotify_id="test",
         **VERIFIED_VERTEX,
     )
-    model = SimpleNamespace(reply="", calls=[], clients=[])
+    model = SimpleNamespace(reply="", calls=[], clients=[], closed=False, closed_async=False)
 
     class FakeModels:
         async def generate_content(self, **request):
@@ -870,13 +891,13 @@ def recognition(tmp_path, monkeypatch):
     class FakeClient:
         def __init__(self, **options):
             model.clients.append(options)
-            self.aio = self
+            self.aio = SimpleNamespace(models=FakeModels(), aclose=self.close_async)
 
-        async def __aenter__(self):
-            return SimpleNamespace(models=FakeModels())
+        async def close_async(self):
+            model.closed_async = True
 
-        async def __aexit__(self, *exc_info):
-            return False
+        def close(self):
+            model.closed = True
 
     monkeypatch.setattr(genai, "Client", FakeClient)
     with TestClient(create_app(settings)) as client:
@@ -888,7 +909,6 @@ def recognize(client):
     return client.post(
         "/api/recognize",
         files={"file": ("cover.png", cover_photo(), "image/png")},
-        data={"generation": "scan-1"},
         headers=csrf(client),
     )
 
@@ -965,3 +985,127 @@ def test_recognition_asks_to_reconnect_when_authorization_expires_mid_lookup(rec
     response = recognize(client)
     assert response.status_code == 401
     assert response.json()["code"] == "provider_authorization"
+
+
+@pytest.mark.parametrize("service", ["spotify", "apple-music"])
+def test_album_offers_only_tracks_playable_in_the_users_market(setup, service):
+    app, client = setup
+    raw, _ = app.state.store.create(
+        {
+            "service": service,
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expires": time.time() + 3600,
+            "user_token": "apple",
+            "storefront": "us",
+        }
+    )
+    client.cookies.set(COOKIE, raw)
+    app.state.providers.developer_token = lambda: "developer"
+    markets = []
+
+    def upstream(request):
+        markets.append(request.url.params.get("market"))
+        if service == "spotify":
+            tracks = [
+                {"id": "playable", "name": "Playable", "is_playable": True},
+                {"id": "blocked", "name": "Blocked", "is_playable": False},
+            ]
+            return httpx.Response(
+                200, json={**spotify_album("album1"), "tracks": {"items": tracks, "next": None}}
+            )
+        tracks = [
+            {"id": "playable", "attributes": {"name": "Playable", "playParams": {"id": "p"}}},
+            {"id": "blocked", "attributes": {"name": "Blocked"}},
+        ]
+        album = {"id": "album1", "attributes": {"name": "Album"}}
+        album["relationships"] = {"tracks": {"data": tracks}}
+        return httpx.Response(200, json={"data": [album]})
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.get("/api/albums/album1")
+    assert [track["id"] for track in response.json()["tracks"]] == ["playable"]
+    if service == "spotify":
+        assert markets == ["from_token"]
+
+
+def test_catalog_search_failure_keeps_the_identification_for_review(recognition):
+    client, model = recognition
+    model.reply = IDENTIFIED
+    client.app.state.providers.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(429, json={}))
+    )
+    response = recognize(client)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"] == []
+    assert body["selected"] is None
+    assert body["evidence"] == "Nirvana — Nevermind"
+    assert len(model.calls) == 1
+
+
+def test_catalog_search_authorization_failure_asks_to_reconnect(recognition):
+    client, model = recognition
+    model.reply = IDENTIFIED
+    client.app.state.providers.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(401, json={}))
+    )
+    response = recognize(client)
+    assert response.status_code == 401
+    assert response.json()["code"] == "provider_authorization"
+
+
+def test_blank_identification_is_unrecognized_without_a_catalog_search(recognition):
+    client, model = recognition
+    model.reply = '{"recognized": true, "artist": " ", "title": ""}'
+    catalog_calls = []
+    client.app.state.providers.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: catalog_calls.append(request))
+    )
+    body = recognize(client).json()
+    assert body["outcome"] == "unrecognized"
+    assert body["evidence"] == "No album could be identified."
+    assert catalog_calls == []
+
+
+def test_gemini_client_is_reused_and_closed_on_shutdown(tmp_path, monkeypatch):
+    settings = Settings(
+        store_path=str(tmp_path / "store.sqlite3"),
+        encryption_key=Fernet.generate_key().decode(),
+        spotify_id="test",
+        **VERIFIED_VERTEX,
+    )
+    clients = []
+
+    class FakeClient:
+        def __init__(self, **options):
+            self.closed = []
+            self.aio = SimpleNamespace(models=self, aclose=self.close_async)
+            clients.append(self)
+
+        async def generate_content(self, **request):
+            return SimpleNamespace(text='{"recognized": false, "artist": "", "title": ""}')
+
+        async def close_async(self):
+            self.closed.append("async")
+
+        def close(self):
+            self.closed.append("sync")
+
+    monkeypatch.setattr(genai, "Client", FakeClient)
+    with TestClient(create_app(settings)) as client:
+        connect(client.app, client)
+        assert recognize(client).status_code == 200
+        assert recognize(client).status_code == 200
+    assert len(clients) == 1
+    assert clients[0].closed == ["async", "sync"]
+
+
+def test_unexpected_image_decoding_errors_are_invalid_uploads(monkeypatch):
+    def corrupt_orientation(image):
+        raise ValueError("corrupt EXIF orientation")
+
+    monkeypatch.setattr("app.main.ImageOps.exif_transpose", corrupt_orientation)
+    with pytest.raises(Problem) as raised:
+        normalize_image(cover_photo())
+    assert raised.value.code == "invalid_upload"
