@@ -32,7 +32,7 @@ See [backend setup](../backend/README.md) for configuration and [the project REA
 
 ## Local verification
 
-Latest checks: ESLint/Prettier/TypeScript and 18 frontend unit tests pass; Ruff and 51 backend tests pass; the local production build passes. Thirteen fixture browser tests cover signed-out Spotify and Apple Music connection (including a cancelled Spotify sign-in), both provider result formats, scan retry, correction, exclusions, polling, reload recovery and mobile layout. Backend tests cover the Spotify callback, Apple session creation and the recognition endpoint with a fake Gemini client. Upstream Python deprecation warnings and the Node test module-type warning remain.
+Latest checks: ESLint/Prettier/TypeScript and 18 frontend unit tests pass; Ruff and 51 backend tests pass; the local production build passes. Fourteen fixture browser tests cover signed-out Spotify and Apple Music connection (including a cancelled Spotify sign-in), Apple Music disconnect when MusicKit sign-out fails, both provider result formats, scan retry, correction, exclusions, polling, reload recovery and mobile layout. Backend tests cover the Spotify callback, Apple session creation and the recognition endpoint with a fake Gemini client. Upstream Python deprecation warnings and the Node test module-type warning remain.
 
 Run `npm run check`, `npm run check:backend`, and `npm run build`. For browser regressions, run the frontend at `http://127.0.0.1:3000` and then `npm run test:browser` (or set `AFTERTONE_TEST_ORIGIN`). Install Playwright Chromium if absent with `npx playwright install chromium`.
 

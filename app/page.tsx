@@ -94,12 +94,22 @@ export default function Home() {
       return;
     try {
       await api('/session', { method: 'DELETE' }, session?.csrfToken);
-      scanner.reset();
-      if (session?.service === 'apple-music') await window.MusicKit?.getInstance().unauthorize();
-      await refresh();
     } catch (error) {
       setNotice(errorMessage(error));
+      return;
     }
+    scanner.reset();
+    // The server session is already gone, so refresh even if MusicKit's own sign-out fails.
+    if (session?.service === 'apple-music') {
+      try {
+        await window.MusicKit?.getInstance().unauthorize();
+      } catch {
+        setNotice(
+          'You are disconnected, but Apple Music did not finish signing out in this browser.',
+        );
+      }
+    }
+    await refresh();
   }
   const add = (files: File[]) => {
     if (session?.authenticated && !locked) scanner.addFiles(files);

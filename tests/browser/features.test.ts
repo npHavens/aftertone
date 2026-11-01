@@ -43,7 +43,9 @@ window.MusicKit = {
   configure: async (config) => { window.musicKitConfig = config; },
   getInstance: () => ({
     authorize: async () => 'test-music-user-token',
-    unauthorize: async () => {},
+    unauthorize: async () => {
+      if (window.failMusicKitSignOut) throw new Error('MusicKit sign-out failed');
+    },
   }),
 };`;
 const developerTokenConfig = {
@@ -376,13 +378,15 @@ test('mobile track selection submits only included tracks without horizontal ove
 
 type SignInState = { service: string | null };
 
-async function signedOutPage(
+// The session can change mid-test, so connection flows start signed out (or as a given service).
+async function connectionPage(
   handle: (route: Route, path: string, state: SignInState) => Promise<boolean>,
+  initialService: string | null = null,
 ) {
   const context = await newTestContext();
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
-  const state: SignInState = { service: null };
+  const state: SignInState = { service: initialService };
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (await handle(route, path, state)) return;
@@ -411,7 +415,7 @@ function spotifyReturn(outcome: string) {
 }
 
 test('spotify: connecting from a signed-out session returns to the connected app', async () => {
-  const { page, context } = await signedOutPage(spotifyReturn('connected=spotify'));
+  const { page, context } = await connectionPage(spotifyReturn('connected=spotify'));
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
@@ -422,7 +426,7 @@ test('spotify: connecting from a signed-out session returns to the connected app
 });
 
 test('a cancelled Spotify connection explains what happened', async () => {
-  const { page, context } = await signedOutPage(spotifyReturn('connection=cancelled'));
+  const { page, context } = await connectionPage(spotifyReturn('connection=cancelled'));
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     await page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' }).waitFor();
@@ -435,7 +439,7 @@ test('a cancelled Spotify connection explains what happened', async () => {
 test('apple-music: connecting hands the MusicKit token to the server', async () => {
   let grant: unknown = null;
   let csrfHeader: string | undefined;
-  const { page, context } = await signedOutPage(async (route, path, state) => {
+  const { page, context } = await connectionPage(async (route, path, state) => {
     if (path !== '/api/auth/apple/session') return false;
     grant = route.request().postDataJSON();
     csrfHeader = route.request().headers()['x-csrf-token'];
@@ -452,6 +456,27 @@ test('apple-music: connecting hands the MusicKit token to the server', async () 
       () => (window as unknown as { musicKitConfig: unknown }).musicKitConfig,
     );
     assert.deepEqual(configured, developerTokenConfig);
+  } finally {
+    await context.close();
+  }
+});
+
+test('apple-music: disconnecting still signs out when MusicKit sign-out fails', async () => {
+  const { page, context } = await connectionPage(async (route, path, state) => {
+    if (path !== '/api/session' || route.request().method() !== 'DELETE') return false;
+    state.service = null;
+    await route.fulfill({ json: { disconnected: true } });
+    return true;
+  }, 'apple-music');
+  try {
+    await page.getByText("You're connected to Apple Music.", { exact: false }).waitFor();
+    await page.waitForFunction(() => 'musicKitConfig' in window);
+    await page.evaluate(() => {
+      (window as unknown as { failMusicKitSignOut: boolean }).failMusicKitSignOut = true;
+    });
+    await page.getByRole('button', { name: 'Disconnect' }).click();
+    await page.getByRole('button', { name: 'Connect Apple Music' }).waitFor();
+    await page.getByText('Apple Music did not finish signing out', { exact: false }).waitFor();
   } finally {
     await context.close();
   }
