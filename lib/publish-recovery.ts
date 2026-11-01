@@ -33,6 +33,27 @@ export function requestTimeoutMs(pending: PendingPublish): number {
   return pending.operation ? STATUS_CHECK_TIMEOUT_MS : publishTimeoutMs(pending.body);
 }
 
+// The server can no longer report this publish, because its record or the session is gone.
+export function irretrievablePublish(status: number): boolean {
+  return status === 401 || status === 404 || status === 410;
+}
+
+// Turns an unreportable publish into one the user can acknowledge after checking their
+// library. Nothing is replayed.
+export function acknowledgeableUncertainty(pending: PendingPublish): PendingPublish {
+  return {
+    ...pending,
+    operation: {
+      ...(pending.operation ?? {}),
+      id: pending.operation?.id ?? pending.key,
+      status: 'needs_attention',
+      addedCount: pending.operation?.addedCount ?? 0,
+      message:
+        'This publish can no longer be checked. Look in your music service to see whether the playlist was created.',
+    },
+  };
+}
+
 export function definitiveRejection(status: number, previouslyUncertain: boolean): boolean {
   return (
     !previouslyUncertain &&

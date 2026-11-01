@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  acknowledgeableUncertainty,
   definitiveRejection,
+  irretrievablePublish,
   publishTimeoutMs,
   readPendingPublish,
   readPlaylistOperation,
@@ -80,4 +82,20 @@ test('status checks of a known operation keep the short timeout', () => {
   const largeDraft = JSON.stringify({ name: 'Mix', trackIds: Array(500).fill('t') });
   assert.equal(requestTimeoutMs({ ...saved, body: largeDraft, operation }), 20_000);
   assert.ok(requestTimeoutMs({ ...saved, body: largeDraft }) > 20_000);
+});
+
+test('a publish the server can no longer report becomes acknowledgeable without replaying', () => {
+  for (const status of [401, 404, 410]) assert.equal(irretrievablePublish(status), true);
+  for (const status of [400, 409, 422, 429, 500]) assert.equal(irretrievablePublish(status), false);
+  const lost = acknowledgeableUncertainty(saved);
+  assert.equal(lost.key, saved.key);
+  assert.equal(lost.body, saved.body);
+  assert.equal(lost.operation?.id, saved.key);
+  assert.equal(lost.operation?.status, 'needs_attention');
+  assert.deepEqual(readPlaylistOperation(lost.operation), lost.operation);
+  const known = { id: 'op-1', status: 'processing' as const, addedCount: 3, playlistUrl: 'u' };
+  const expired = acknowledgeableUncertainty({ ...saved, operation: known });
+  assert.equal(expired.operation?.id, 'op-1');
+  assert.equal(expired.operation?.addedCount, 3);
+  assert.equal(expired.operation?.playlistUrl, 'u');
 });

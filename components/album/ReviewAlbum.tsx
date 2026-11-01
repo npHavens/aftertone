@@ -31,6 +31,8 @@ export function ReviewAlbum({
   const searchButton = useRef<HTMLButtonElement>(null);
   const excludedTracks = new Set(item.excludedTrackIds ?? []);
   const selectedCount = item.album?.tracks.filter((track) => !excludedTracks.has(track.id)).length;
+  // Other albums the catalog matched for this photo, offered before any manual search.
+  const suggestions = item.candidates.filter((album) => album.id !== item.album?.id);
   const closeSearch = () => {
     setSearching(false);
     searchButton.current?.focus();
@@ -97,7 +99,7 @@ export function ReviewAlbum({
               aria-controls={searching ? searchId : undefined}
               onClick={() => setSearching(!searching)}
             >
-              Find another match
+              {item.album ? 'Find another match' : 'Choose a match'}
             </button>
             <button className="text-button" disabled={locked} onClick={() => onRemove()}>
               Remove
@@ -124,6 +126,7 @@ export function ReviewAlbum({
       {searching && !locked && (
         <MatchSearch
           id={searchId}
+          suggestions={suggestions}
           onClose={closeSearch}
           onChoose={(album) => {
             onChoose(album);
