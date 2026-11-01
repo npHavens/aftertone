@@ -15,7 +15,10 @@ from dotenv import load_dotenv
 
 class Problem(Exception):
     def __init__(self, code, message, status=400, retryable=False):
-        self.code, self.message, self.status, self.retryable = code, message, status, retryable
+        self.code = code
+        self.message = message
+        self.status = status
+        self.retryable = retryable
         self.write_not_started = False
 
 
@@ -165,7 +168,8 @@ class Store:
                     )
                 self.db.execute("COMMIT")
                 return json.loads(existing["data"]), False
-            # Outlive the owner session, so a live session can always re-check its publish.
+            # Expire no sooner than the owner session, so a live session can always re-check its
+            # publish. Records are still deleted with their session.
             self.db.execute(
                 "INSERT INTO operations VALUES (?,?,?,?,?,?)",
                 (op["id"], owner, idem, digest, time.time() + self.settings.ttl, json.dumps(op)),

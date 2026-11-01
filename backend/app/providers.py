@@ -40,7 +40,8 @@ def spotify_track_available(track, track_id):
 
 class Providers:
     def __init__(self, settings, store):
-        self.settings, self.store = settings, store
+        self.settings = settings
+        self.store = store
         self.http = httpx.AsyncClient(timeout=30, follow_redirects=False)
         self.refresh_lock = asyncio.Lock()
         self.apple_tokens = {}
@@ -177,22 +178,46 @@ class Providers:
                 "id": item["id"],
                 "service": service,
                 "title": item["name"],
-                "artist": ", ".join(a["name"] for a in item.get("artists", [])),
-                "artworkUrl": next((i["url"] for i in item.get("images", [])), None),
+                "artist": ", ".join(artist["name"] for artist in item.get("artists", [])),
+                "artworkUrl": next((image["url"] for image in item.get("images", [])), None),
                 "url": item.get("external_urls", {}).get("spotify"),
                 "tracks": [],
             }
-        a = item["attributes"]
-        art = a.get("artwork", {}).get("url")
+        attributes = item["attributes"]
+        art = attributes.get("artwork", {}).get("url")
         return {
             "id": item["id"],
             "service": service,
-            "title": a["name"],
-            "artist": a.get("artistName", ""),
+            "title": attributes["name"],
+            "artist": attributes.get("artistName", ""),
             "artworkUrl": art.replace("{w}", "400").replace("{h}", "400") if art else None,
-            "url": a.get("url"),
+            "url": attributes.get("url"),
             "tracks": [],
         }
+
+    def track_shape(self, track, service):
+        if service == "spotify":
+            return {
+                "id": track["id"],
+                "title": track["name"],
+                "artist": ", ".join(artist["name"] for artist in track.get("artists", [])),
+                "durationMs": track.get("duration_ms"),
+                "url": track.get("external_urls", {}).get("spotify"),
+            }
+        attributes = track["attributes"]
+        return {
+            "id": track["id"],
+            "title": attributes["name"],
+            "artist": attributes.get("artistName", ""),
+            "durationMs": attributes.get("durationInMillis"),
+            "url": attributes.get("url"),
+        }
+
+    def playable_track(self, track, service):
+        # Offer only tracks the user can play, so preflight doesn't reject a confirmed album.
+        if service == "spotify":
+            return track.get("is_playable") is not False
+        return bool(track.get("attributes", {}).get("playParams"))
 
     async def search(self, session, q, offset=0):
         service = session["data"]["service"]
@@ -212,14 +237,17 @@ class Providers:
                 params={"term": q, "types": "albums", "limit": 10, "offset": offset},
             )
             items = result.get("results", {}).get("albums", {}).get("data", [])
-        return [self.album_shape(x, service) for x in items]
+        return [self.album_shape(item, service) for item in items]
 
     async def album(self, session, album_id):
         if not re.fullmatch(r"[A-Za-z0-9.\-]+", album_id):
             raise Problem("invalid_id", "Invalid catalog album ID.")
         service = session["data"]["service"]
         if service == "spotify":
-            item = await self.request(session, "GET", "/albums/" + album_id)
+            # The user's market adds is_playable, matching what preflight checks.
+            item = await self.request(
+                session, "GET", "/albums/" + album_id, params={"market": "from_token"}
+            )
             page = item["tracks"]
         else:
             result = await self.request(
@@ -234,22 +262,8 @@ class Providers:
         album = self.album_shape(item, service)
         for _ in range(100):
             for track in page.get("items" if service == "spotify" else "data", []):
-                a = track if service == "spotify" else track["attributes"]
-                album["tracks"].append(
-                    {
-                        "id": track["id"],
-                        "title": a["name"],
-                        "artist": ", ".join(x["name"] for x in a.get("artists", []))
-                        if service == "spotify"
-                        else a.get("artistName", ""),
-                        "durationMs": a.get(
-                            "duration_ms" if service == "spotify" else "durationInMillis"
-                        ),
-                        "url": a.get("external_urls", {}).get("spotify")
-                        if service == "spotify"
-                        else a.get("url"),
-                    }
-                )
+                if self.playable_track(track, service):
+                    album["tracks"].append(self.track_shape(track, service))
             if not page.get("next"):
                 return album
             page = await self.request(session, "GET", page["next"])
@@ -328,21 +342,21 @@ class Providers:
                 op["playlistUrl"] = (playlist.get("attributes") or {}).get("url")
             self.store.save_operation(op)
             # Small bounded batches; writes are never automatically retried.
-            for i in range(0, len(payload["trackIds"]), 25):
-                batch = payload["trackIds"][i : i + 25]
+            for start in range(0, len(payload["trackIds"]), 25):
+                batch = payload["trackIds"][start : start + 25]
                 if service == "spotify":
                     await self.request(
                         session,
                         "POST",
                         "/playlists/" + op["playlistId"] + "/items",
-                        json={"uris": ["spotify:track:" + x for x in batch]},
+                        json={"uris": ["spotify:track:" + track_id for track_id in batch]},
                     )
                 else:
                     await self.request(
                         session,
                         "POST",
                         "/v1/me/library/playlists/" + op["playlistId"] + "/tracks",
-                        json={"data": [{"id": x, "type": "songs"} for x in batch]},
+                        json={"data": [{"id": track_id, "type": "songs"} for track_id in batch]},
                     )
                 op["addedCount"] += len(batch)
                 self.store.save_operation(op)
