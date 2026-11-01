@@ -3,18 +3,26 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
 import type { ProviderAlbum } from '@/types';
 
+function suggestionMessage(count: number): string {
+  if (!count) return '';
+  const matches = count === 1 ? '1 possible match' : `${count} possible matches`;
+  return `${matches} from your photo. Choose one or search.`;
+}
+
 export function MatchSearch({
   id,
+  suggestions = [],
   onChoose,
   onClose,
 }: {
   id: string;
+  suggestions?: ProviderAlbum[];
   onChoose: (album: ProviderAlbum) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const [albums, setAlbums] = useState<ProviderAlbum[]>([]);
-  const [message, setMessage] = useState('');
+  const [albums, setAlbums] = useState<ProviderAlbum[]>(suggestions);
+  const [message, setMessage] = useState(suggestionMessage(suggestions.length));
   const [busy, setBusy] = useState(false);
   const [choosingId, setChoosingId] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);

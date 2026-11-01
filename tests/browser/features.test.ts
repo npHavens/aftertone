@@ -94,7 +94,6 @@ async function fixturePage(
           selected: album(service),
           candidates: [album(service)],
           evidence: 'Review this match.',
-          generation: 'test',
         },
       });
     } else if (path === '/api/albums/search') {
@@ -339,7 +338,7 @@ test('mobile track selection submits only included tracks without horizontal ove
         url: null,
       });
       await route.fulfill({
-        json: { outcome: 'needs_review', selected: match, candidates: [match], generation: 'test' },
+        json: { outcome: 'needs_review', selected: match, candidates: [match] },
       });
       return true;
     }
@@ -477,6 +476,60 @@ test('apple-music: disconnecting still signs out when MusicKit sign-out fails', 
     await page.getByRole('button', { name: 'Disconnect' }).click();
     await page.getByRole('button', { name: 'Connect Apple Music' }).waitFor();
     await page.getByText('Apple Music did not finish signing out', { exact: false }).waitFor();
+  } finally {
+    await context.close();
+  }
+});
+
+test('alternatives from the photo are offered when the top match did not load', async () => {
+  const { page, context } = await fixturePage(async (route, path) => {
+    if (path !== '/api/recognize') return false;
+    await route.fulfill({
+      json: {
+        outcome: 'needs_review',
+        selected: null,
+        candidates: [album()],
+        evidence: 'Test artist — Test album',
+      },
+    });
+    return true;
+  });
+  try {
+    await page.locator('input[type=file]').setInputFiles(photo);
+    await page.getByRole('button', { name: 'Choose a match' }).click();
+    await page.getByText('1 possible match from your photo.', { exact: false }).waitFor();
+    await page
+      .getByRole('button', { name: 'Choose Test album by Test artist', exact: true })
+      .click();
+    await page.getByText('View tracks', { exact: true }).waitFor();
+  } finally {
+    await context.close();
+  }
+});
+
+test('a publish the server can no longer report can be acknowledged', async () => {
+  let attempts = 0;
+  const { page, context } = await fixturePage(async (route, path) => {
+    if (path !== '/api/playlists') return false;
+    attempts += 1;
+    if (attempts === 1) await route.abort('connectionfailed');
+    else
+      await route.fulfill({
+        status: 410,
+        json: { code: 'operation_expired', message: 'This publish record expired.' },
+      });
+    return true;
+  });
+  try {
+    await confirmPhoto(page);
+    await page.getByRole('button', { name: 'Make my playlist' }).click();
+    await page.getByRole('button', { name: 'Check same request' }).click();
+    await page.getByText('This publish can no longer be checked.', { exact: false }).waitFor();
+    page.once('dialog', (dialog) => void dialog.accept());
+    await page.getByRole('button', { name: 'I’ve checked — start a new mix' }).click();
+    await page.getByRole('button', { name: 'Choose photos' }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Choose photos' }).isEnabled(), true);
+    assert.equal(attempts, 2);
   } finally {
     await context.close();
   }

@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, errorMessage } from '@/lib/api';
 import {
+  acknowledgeableUncertainty,
   definitiveRejection,
+  irretrievablePublish,
   publishStorageKey,
   readPendingPublish,
   readPlaylistOperation,
@@ -101,6 +103,9 @@ export function usePublishOperation(session: Session | null) {
         ) {
           save(null);
           setMessage(`${errorMessage(error)} Your draft is ready to edit.`);
+        } else if (error instanceof ApiError && irretrievablePublish(error.status)) {
+          save(acknowledgeableUncertainty(value));
+          setMessage('');
         } else {
           const reason = controller.signal.aborted
             ? 'The music service is taking longer than expected.'

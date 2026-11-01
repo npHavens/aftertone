@@ -66,7 +66,6 @@ export interface RecognitionResult {
   candidates: ProviderAlbum[];
   selected: ProviderAlbum | null;
   evidence: string;
-  generation: string;
 }
 export interface ScanItem {
   id: string;

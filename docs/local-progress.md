@@ -26,13 +26,14 @@ See [backend setup](../backend/README.md) for configuration and [the project REA
 ## Known limits and follow-up
 
 - Local publishing uses one backend worker. It has no distributed queue or automatic reconciliation of uncertain writes.
+- Preflight checks each track individually: Spotify Development Mode removed batch track lookup, so checks run eight at a time. Apple Music's batch song lookup is a follow-up once Apple credentials allow live testing. Spotify token refresh uses one process-wide lock, which suits the local single-user backend.
 - Publish records outlive their session, so an unknown outcome can always be re-checked while signed in. It stays frozen in the browser until checked or acknowledged; inspect the provider library before attempting a new playlist. Recovery across expired authorization needs further product work.
 - The current Next.js 16.2.6 dependency advisories need a separate, tested framework upgrade. ESLint stays on version 9 until the React/accessibility plugins support version 10.
 - AI-generated playlists remain a future feature. Final vector/monochrome logo assets remain brand follow-up work.
 
 ## Local verification
 
-Latest checks: ESLint/Prettier/TypeScript and 18 frontend unit tests pass; Ruff and 51 backend tests pass; the local production build passes. Fourteen fixture browser tests cover signed-out Spotify and Apple Music connection (including a cancelled Spotify sign-in), Apple Music disconnect when MusicKit sign-out fails, both provider result formats, scan retry, correction, exclusions, polling, reload recovery and mobile layout. Backend tests cover the Spotify callback, Apple session creation and the recognition endpoint with a fake Gemini client. Upstream Python deprecation warnings and the Node test module-type warning remain.
+Latest checks: ESLint/Prettier/TypeScript and 19 frontend unit tests pass; Ruff and 58 backend tests pass; the local production build passes. Sixteen fixture browser tests cover signed-out Spotify and Apple Music connection (including a cancelled Spotify sign-in), Apple Music disconnect when MusicKit sign-out fails, recognition alternatives when the top match fails, acknowledging a publish the server can no longer report, both provider result formats, scan retry, correction, exclusions, polling, reload recovery and mobile layout. Backend tests cover the Spotify callback, Apple session creation and the recognition endpoint with a fake Gemini client. Upstream Python deprecation warnings and the Node test module-type warning remain.
 
 Run `npm run check`, `npm run check:backend`, and `npm run build`. For browser regressions, run the frontend at `http://127.0.0.1:3000` and then `npm run test:browser` (or set `AFTERTONE_TEST_ORIGIN`). Install Playwright Chromium if absent with `npx playwright install chromium`.
 

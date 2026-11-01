@@ -37,7 +37,6 @@ export function useScanner(
       patch(item.id, { status: 'processing' });
       const form = new FormData();
       form.set('file', item.file);
-      form.set('generation', item.id);
       void api<RecognitionResult>(
         '/recognize',
         { method: 'POST', body: form, signal: controller.signal },
