@@ -36,6 +36,7 @@ export default function Home() {
   const [connecting, setConnecting] = useState(false);
   const [kitLoaded, setKitLoaded] = useState(false);
   const [kitReady, setKitReady] = useState(false);
+  const developerTokenExpiresAt = useRef(0);
   const [name, setName] = useState('My rediscovered favorites');
   const publisher = usePublishOperation(session);
   const { operation, busy: publishing, locked } = publisher;
@@ -53,11 +54,12 @@ export default function Home() {
   useEffect(() => {
     if (!kitLoaded || !session?.capabilities.appleMusic) return;
     let cancelled = false;
-    void api<{ developerToken: string; app: { name: string; build: string } }>(
+    void api<{ developerToken: string; expiresAt: number; app: { name: string; build: string } }>(
       '/auth/apple/developer-token',
     )
-      .then(async (config) => {
-        await window.MusicKit?.configure(config);
+      .then(async ({ developerToken, expiresAt, app }) => {
+        await window.MusicKit?.configure({ developerToken, app });
+        developerTokenExpiresAt.current = expiresAt;
         if (!cancelled) setKitReady(true);
       })
       .catch((error) => {
@@ -69,6 +71,12 @@ export default function Home() {
   }, [kitLoaded, session?.capabilities.appleMusic]);
   async function connectApple() {
     if (!window.MusicKit || !kitReady || connecting) return;
+    // MusicKit documents no way to replace a configured developer token, so an expiring one
+    // needs a fresh page. No photos are lost, because they can't be added before connecting.
+    if (Date.now() / 1000 > developerTokenExpiresAt.current - 60) {
+      window.location.assign('/?connection=apple-restart');
+      return;
+    }
     setConnecting(true);
     setNotice('');
     try {

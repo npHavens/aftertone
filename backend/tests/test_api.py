@@ -796,7 +796,9 @@ def test_apple_tokens_limit_the_browser_origin_and_are_reused(tmp_path):
     settings, key_path = apple_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
         client.get("/api/session")
-        browser = client.get("/api/auth/apple/developer-token").json()["developerToken"]
+        config = client.get("/api/auth/apple/developer-token").json()
+        browser = config["developerToken"]
+        assert config["expiresAt"] == claims(browser)["exp"]
         providers = client.app.state.providers
         server = providers.developer_token()
         assert claims(browser)["origin"] == [ORIGIN]

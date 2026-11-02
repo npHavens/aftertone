@@ -48,9 +48,13 @@ window.MusicKit = {
     },
   }),
 };`;
-const developerTokenConfig = {
+const musicKitConfig = {
   developerToken: 'test-developer-token',
   app: { name: 'Aftertone', build: '1' },
+};
+const developerTokenConfig = {
+  ...musicKitConfig,
+  expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
 
 async function newTestContext(): Promise<BrowserContext> {
@@ -454,7 +458,7 @@ test('apple-music: connecting hands the MusicKit token to the server', async () 
     const configured = await page.evaluate(
       () => (window as unknown as { musicKitConfig: unknown }).musicKitConfig,
     );
-    assert.deepEqual(configured, developerTokenConfig);
+    assert.deepEqual(configured, musicKitConfig);
   } finally {
     await context.close();
   }
@@ -582,6 +586,37 @@ test('a known operation the server no longer has can be acknowledged', async () 
     await page.getByRole('button', { name: 'I’ve checked — start a new mix' }).click();
     await page.getByRole('button', { name: 'Choose photos' }).waitFor();
     assert.equal(publishes, 1);
+  } finally {
+    await context.close();
+  }
+});
+
+test('apple-music: an expiring developer token restarts the page before signing in', async () => {
+  let tokenRequests = 0;
+  let sessions = 0;
+  const { page, context } = await connectionPage(async (route, path, state) => {
+    if (path === '/api/auth/apple/developer-token') {
+      tokenRequests += 1;
+      const expiresAt = tokenRequests === 1 ? Math.floor(Date.now() / 1000) + 30 : undefined;
+      await route.fulfill({
+        json: { ...developerTokenConfig, ...(expiresAt ? { expiresAt } : {}) },
+      });
+      return true;
+    }
+    if (path !== '/api/auth/apple/session') return false;
+    sessions += 1;
+    state.service = 'apple-music';
+    await route.fulfill({ json: { authenticated: true, service: 'apple-music' } });
+    return true;
+  });
+  try {
+    await page.getByRole('button', { name: 'Connect Apple Music' }).click();
+    await page.getByText('Apple Music needed a fresh start.', { exact: false }).waitFor();
+    assert.equal(sessions, 0);
+    await page.getByRole('button', { name: 'Connect Apple Music' }).click();
+    await page.getByText("You're connected to Apple Music.", { exact: false }).waitFor();
+    assert.equal(tokenRequests, 2);
+    assert.equal(sessions, 1);
   } finally {
     await context.close();
   }
