@@ -519,6 +519,7 @@ def test_album_tracks_include_next_page(setup, service):
                                     "data": [
                                         {
                                             "id": "t1",
+                                            "type": "songs",
                                             "attributes": {
                                                 "name": "First",
                                                 "playParams": {"id": "t1", "kind": "song"},
@@ -538,6 +539,7 @@ def test_album_tracks_include_next_page(setup, service):
                 "data": [
                     {
                         "id": "t2",
+                        "type": "songs",
                         "attributes": {
                             "name": "Second",
                             "playParams": {"id": "t2", "kind": "song"},
@@ -796,13 +798,14 @@ def test_apple_tokens_limit_the_browser_origin_and_are_reused(tmp_path):
     settings, key_path = apple_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
         client.get("/api/session")
-        config = client.get("/api/auth/apple/developer-token").json()
-        browser = config["developerToken"]
-        assert config["expiresAt"] == claims(browser)["exp"]
+        browser = client.get("/api/auth/apple/developer-token").json()["developerToken"]
         providers = client.app.state.providers
         server = providers.developer_token()
         assert claims(browser)["origin"] == [ORIGIN]
         assert "origin" not in claims(server)
+        # MusicKit keeps its token for the life of the page; server calls renew hourly.
+        assert claims(browser)["exp"] - claims(browser)["iat"] == 30 * 86400
+        assert claims(server)["exp"] - claims(server)["iat"] == 3600
         key_path.unlink()
         assert providers.developer_token() == server
         assert providers.developer_token(browser=True) == browser
@@ -1012,13 +1015,23 @@ def test_album_offers_only_tracks_playable_in_the_users_market(setup, service):
             tracks = [
                 {"id": "playable", "name": "Playable", "is_playable": True},
                 {"id": "blocked", "name": "Blocked", "is_playable": False},
+                {"id": "restricted", "name": "Restricted", "restrictions": {"reason": "explicit"}},
             ]
             return httpx.Response(
                 200, json={**spotify_album("album1"), "tracks": {"items": tracks, "next": None}}
             )
         tracks = [
-            {"id": "playable", "attributes": {"name": "Playable", "playParams": {"id": "p"}}},
-            {"id": "blocked", "attributes": {"name": "Blocked"}},
+            {
+                "id": "playable",
+                "type": "songs",
+                "attributes": {"name": "Playable", "playParams": {"id": "p"}},
+            },
+            {"id": "blocked", "type": "songs", "attributes": {"name": "Blocked"}},
+            {
+                "id": "video",
+                "type": "music-videos",
+                "attributes": {"name": "Video", "playParams": {"id": "v"}},
+            },
         ]
         album = {"id": "album1", "attributes": {"name": "Album"}}
         album["relationships"] = {"tracks": {"data": tracks}}

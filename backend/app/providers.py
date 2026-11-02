@@ -13,7 +13,10 @@ from .core import Problem
 
 # Spotify Development Mode has no batch track lookup, so preflight checks a few tracks at a time.
 VALIDATION_CONCURRENCY = 8
-APPLE_TOKEN_LIFETIME = 3600
+APPLE_SERVER_TOKEN_LIFETIME = 3600
+# MusicKit can't swap a configured token, so the origin-limited browser token must outlast
+# any open page. Apple allows developer tokens up to six months.
+APPLE_BROWSER_TOKEN_LIFETIME = 30 * 86400
 UNCERTAIN_PUBLISH = (
     "Publishing may have partially succeeded. Check your music library before trying a new "
     "publish. This operation will not replay any writes."
@@ -58,7 +61,8 @@ class Providers:
         if cached and cached["expires"] - 300 > time.time():
             return cached["token"]
         now = int(time.time())
-        claims = {"iss": self.settings.apple_team, "iat": now, "exp": now + APPLE_TOKEN_LIFETIME}
+        lifetime = APPLE_BROWSER_TOKEN_LIFETIME if browser else APPLE_SERVER_TOKEN_LIFETIME
+        claims = {"iss": self.settings.apple_team, "iat": now, "exp": now + lifetime}
         if browser:
             # MusicKit's token is limited to this app. Server calls send no Origin header,
             # so they use an unrestricted token that never reaches the browser.
@@ -72,13 +76,8 @@ class Providers:
             )
         except Exception:
             raise Problem("setup_required", "Apple Music signing key could not be loaded.", 503)
-        self.apple_tokens[audience] = {"token": token, "expires": now + APPLE_TOKEN_LIFETIME}
+        self.apple_tokens[audience] = {"token": token, "expires": now + lifetime}
         return token
-
-    def browser_developer_token(self):
-        # The page needs the expiry too, because a configured MusicKit can't swap tokens.
-        token = self.developer_token(browser=True)
-        return token, self.apple_tokens["browser"]["expires"]
 
     async def send(self, method, url, **kwargs):
         try:
@@ -219,10 +218,11 @@ class Providers:
         }
 
     def playable_track(self, track, service):
-        # Offer only tracks the user can play, so preflight doesn't reject a confirmed album.
+        # Offer only what preflight will accept, so a confirmed album can always be published.
         if service == "spotify":
-            return track.get("is_playable") is not False
-        return bool(track.get("attributes", {}).get("playParams"))
+            return spotify_track_available(track, track["id"])
+        # Album track lists can include music videos, which are not playlist songs.
+        return track.get("type") == "songs" and bool(track.get("attributes", {}).get("playParams"))
 
     async def search(self, session, q, offset=0):
         service = session["data"]["service"]
