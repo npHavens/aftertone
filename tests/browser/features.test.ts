@@ -586,3 +586,95 @@ test('a known operation the server no longer has can be acknowledged', async () 
     await context.close();
   }
 });
+
+// Recognition responses held until the test releases them, to simulate slow model calls.
+async function release(held: Route[], result: unknown) {
+  for (const route of held.splice(0)) {
+    // A request the page already aborted can't be fulfilled; that is the point of the test.
+    await route.fulfill({ json: result }).catch(() => {});
+  }
+}
+
+async function until(condition: () => boolean) {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(condition());
+}
+
+function recognized(match = album()) {
+  return { outcome: 'needs_review', selected: match, candidates: [match], evidence: 'Match' };
+}
+
+test('a late recognition result never restores a removed photo, and queued photos continue', async () => {
+  const held: Route[] = [];
+  const { page, context } = await fixturePage(async (route, path) => {
+    if (path !== '/api/recognize') return false;
+    held.push(route);
+    return true;
+  });
+  try {
+    const photos = ['one.png', 'two.png', 'three.png'].map((name) => ({ ...photo, name }));
+    await page.locator('input[type=file]').setInputFiles(photos);
+    await until(() => held.length === 2);
+    await page.locator('.album-review').first().getByRole('button', { name: 'Remove' }).click();
+    await until(() => held.length === 3);
+    await release(held, recognized());
+    await page.getByText('Your review needed').nth(1).waitFor();
+    assert.equal(await page.locator('.album-review').count(), 2);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a late recognition result never replaces a match chosen by hand', async () => {
+  const held: Route[] = [];
+  const { page, context } = await fixturePage(async (route, path) => {
+    if (path !== '/api/recognize') return false;
+    held.push(route);
+    return true;
+  });
+  try {
+    await page.locator('input[type=file]').setInputFiles(photo);
+    await until(() => held.length === 1);
+    await page.getByRole('button', { name: 'Choose a match' }).click();
+    await page.getByLabel('Artist or album title').fill('Test artist');
+    await page
+      .getByRole('button', { name: 'Choose Test album by Test artist', exact: true })
+      .click();
+    await page.getByText('Added to your mix').waitFor();
+    await release(held, recognized({ ...album(), id: 'album2', title: 'Wrong album' }));
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    assert.equal(await page.getByText('Wrong album').count(), 0);
+    assert.equal(await page.getByText('Added to your mix').count(), 1);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a late recognition result never returns after disconnecting', async () => {
+  const held: Route[] = [];
+  const { page, context } = await connectionPage(async (route, path, state) => {
+    if (path === '/api/recognize') {
+      held.push(route);
+      return true;
+    }
+    if (path !== '/api/session' || route.request().method() !== 'DELETE') return false;
+    state.service = null;
+    await route.fulfill({ json: { disconnected: true } });
+    return true;
+  }, 'spotify');
+  try {
+    await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
+    await page.locator('input[type=file]').setInputFiles(photo);
+    await until(() => held.length === 1);
+    page.once('dialog', (dialog) => void dialog.accept());
+    await page.getByRole('button', { name: 'Disconnect' }).click();
+    await page.getByRole('button', { name: 'Connect Spotify' }).waitFor();
+    await release(held, recognized());
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    assert.equal(await page.locator('.album-review').count(), 0);
+  } finally {
+    await context.close();
+  }
+});
