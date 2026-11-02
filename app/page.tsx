@@ -7,7 +7,7 @@ import { ReviewAlbum } from '@/components/album/ReviewAlbum';
 import { useEffect, useRef, useState } from 'react';
 import { useSession } from '@/hooks/useSession';
 import { useScanner } from '@/hooks/useScanner';
-import { api, errorMessage } from '@/lib/api';
+import { api, ApiError, errorMessage } from '@/lib/api';
 import { selectedTrackIds } from '@/lib/playlist-selection';
 import { usePublishOperation } from '@/hooks/usePublishOperation';
 import { PublishResult } from '@/components/playlist/PublishResult';
@@ -95,8 +95,12 @@ export default function Home() {
     try {
       await api('/session', { method: 'DELETE' }, session?.csrfToken);
     } catch (error) {
-      setNotice(errorMessage(error));
-      return;
+      // An expired session is already disconnected on the server, so carry on to sign out locally.
+      const alreadySignedOut = error instanceof ApiError && error.status === 401;
+      if (!alreadySignedOut) {
+        setNotice(errorMessage(error));
+        return;
+      }
     }
     scanner.reset();
     // The server session is already gone, so refresh even if MusicKit's own sign-out fails.

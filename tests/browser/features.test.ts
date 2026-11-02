@@ -534,3 +534,55 @@ test('a publish the server can no longer report can be acknowledged', async () =
     await context.close();
   }
 });
+
+test('disconnecting after the session expired returns to signed out', async () => {
+  const { page, context } = await connectionPage(async (route, path, state) => {
+    if (path !== '/api/session' || route.request().method() !== 'DELETE') return false;
+    state.service = null;
+    await route.fulfill({
+      status: 401,
+      json: {
+        code: 'unauthenticated',
+        message: 'Your session expired. Reconnect your music service.',
+      },
+    });
+    return true;
+  }, 'spotify');
+  try {
+    await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
+    await page.getByRole('button', { name: 'Disconnect' }).click();
+    await page.getByRole('button', { name: 'Connect Spotify' }).waitFor();
+  } finally {
+    await context.close();
+  }
+});
+
+test('a known operation the server no longer has can be acknowledged', async () => {
+  let publishes = 0;
+  const { page, context } = await fixturePage(async (route, path) => {
+    if (path === '/api/playlists') {
+      publishes += 1;
+      await route.fulfill({ json: { id: 'gone-op', status: 'processing', addedCount: 0 } });
+      return true;
+    }
+    if (path === '/api/playlist-operations/gone-op') {
+      await route.fulfill({
+        status: 404,
+        json: { code: 'not_found', message: 'Publish operation not found.' },
+      });
+      return true;
+    }
+    return false;
+  });
+  try {
+    await confirmPhoto(page);
+    await page.getByRole('button', { name: 'Make my playlist' }).click();
+    await page.getByText('This publish can no longer be checked.', { exact: false }).waitFor();
+    page.once('dialog', (dialog) => void dialog.accept());
+    await page.getByRole('button', { name: 'I’ve checked — start a new mix' }).click();
+    await page.getByRole('button', { name: 'Choose photos' }).waitFor();
+    assert.equal(publishes, 1);
+  } finally {
+    await context.close();
+  }
+});
