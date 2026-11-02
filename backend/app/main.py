@@ -287,8 +287,10 @@ def create_app(settings=None):
     async def apple_token(request: Request):
         session = session_for(request, False)
         throttle(session, "connect", 10)
+        token, expires_at = providers.browser_developer_token()
         return {
-            "developerToken": providers.developer_token(browser=True),
+            "developerToken": token,
+            "expiresAt": expires_at,
             "app": {"name": "Aftertone", "build": "1"},
         }
 

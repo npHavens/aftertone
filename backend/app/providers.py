@@ -75,6 +75,11 @@ class Providers:
         self.apple_tokens[audience] = {"token": token, "expires": now + APPLE_TOKEN_LIFETIME}
         return token
 
+    def browser_developer_token(self):
+        # The page needs the expiry too, because a configured MusicKit can't swap tokens.
+        token = self.developer_token(browser=True)
+        return token, self.apple_tokens["browser"]["expires"]
+
     async def send(self, method, url, **kwargs):
         try:
             response = await self.http.request(method, url, **kwargs)

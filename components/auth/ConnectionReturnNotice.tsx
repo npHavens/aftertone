@@ -7,6 +7,7 @@ const connectionMessages = new Map([
   ['cancelled', 'Connection was cancelled. Connect your music service when you are ready.'],
   ['expired', 'That connection attempt expired. Please connect your music service again.'],
   ['failed', 'The music service did not complete the connection. Please try again.'],
+  ['apple-restart', 'Apple Music needed a fresh start. Select Connect Apple Music again.'],
 ]);
 
 function ReturnNotice() {
