@@ -35,7 +35,13 @@ export function DropZone({ onFilesAdded, compact = false }: DropZoneProps) {
         )}
       >
         <input {...getInputProps()} />
-        <svg viewBox="0 0 24 24" className="h-5 w-5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-zinc-400"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
           <path d="M12 5v14M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span className="text-sm text-zinc-400">
@@ -87,23 +93,30 @@ export function DropZone({ onFilesAdded, compact = false }: DropZoneProps) {
           {isDragActive ? 'Drop your CDs here' : 'Drop CD photos here'}
         </p>
         <p className="mt-2 text-sm text-zinc-500">
-          or <span className="text-amber-500 underline underline-offset-2">click to browse</span> — supports JPG, PNG, HEIC
+          or <span className="text-amber-500 underline underline-offset-2">click to browse</span> —
+          supports JPG, PNG, HEIC
         </p>
       </div>
 
       <div className="flex items-center gap-8 text-xs text-zinc-600">
         <span className="flex items-center gap-1.5">
-          <span className="h-5 w-5 rounded-full bg-zinc-800 flex items-center justify-center text-amber-500 text-xs font-bold">1</span>
+          <span className="h-5 w-5 rounded-full bg-zinc-800 flex items-center justify-center text-amber-500 text-xs font-bold">
+            1
+          </span>
           Drop photos
         </span>
         <span className="text-zinc-800">→</span>
         <span className="flex items-center gap-1.5">
-          <span className="h-5 w-5 rounded-full bg-zinc-800 flex items-center justify-center text-amber-500 text-xs font-bold">2</span>
+          <span className="h-5 w-5 rounded-full bg-zinc-800 flex items-center justify-center text-amber-500 text-xs font-bold">
+            2
+          </span>
           Identify albums
         </span>
         <span className="text-zinc-800">→</span>
         <span className="flex items-center gap-1.5">
-          <span className="h-5 w-5 rounded-full bg-zinc-800 flex items-center justify-center text-amber-500 text-xs font-bold">3</span>
+          <span className="h-5 w-5 rounded-full bg-zinc-800 flex items-center justify-center text-amber-500 text-xs font-bold">
+            3
+          </span>
           Create playlist
         </span>
       </div>

@@ -1,23 +1,20 @@
 import type { Metadata } from 'next';
-import { Inter, Playfair_Display } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
-
-const playfair = Playfair_Display({
-  subsets: ['latin'],
-  variable: '--font-playfair',
+const display = localFont({
+  src: '../public/fonts/Jersey10-Regular.ttf',
+  variable: '--font-display',
+  display: 'swap',
 });
-
 export const metadata: Metadata = {
-  title: 'Discify — Turn Your CDs Into Playlists',
-  description: 'Upload photos of your CDs and instantly create Spotify or Apple Music playlists.',
+  title: 'Aftertone — Your music, rediscovered.',
+  description:
+    'Turn album photos into a playlist. Connect Spotify or Apple Music and bring the favorites back.',
 };
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100">{children}</body>
+    <html lang="en" className={display.variable}>
+      <body>{children}</body>
     </html>
   );
 }
