@@ -25,7 +25,8 @@ export function AlbumCard({ cd, onRemove }: AlbumCardProps) {
             alt={album.title}
             className="h-full w-full object-cover"
             onError={(e) => {
-              (e.target as HTMLImageElement).src = `https://placehold.co/200x200/1a1a1a/444?text=${encodeURIComponent(album.artist[0])}`;
+              (e.target as HTMLImageElement).src =
+                `https://placehold.co/200x200/1a1a1a/444?text=${encodeURIComponent(album.artist[0])}`;
             }}
           />
         </div>
@@ -55,7 +56,9 @@ export function AlbumCard({ cd, onRemove }: AlbumCardProps) {
               onClick={() => setExpanded((v) => !v)}
               className="text-xs text-zinc-500 hover:text-amber-500 transition-colors"
             >
-              {expanded ? '▲ Hide tracks' : `▼ ${album.tracks.length} tracks · ${formatTotalDuration(album.totalDurationSeconds)}`}
+              {expanded
+                ? '▲ Hide tracks'
+                : `▼ ${album.tracks.length} tracks · ${formatTotalDuration(album.totalDurationSeconds)}`}
             </button>
           </div>
         </div>
