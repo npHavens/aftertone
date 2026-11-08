@@ -49,6 +49,7 @@ Aftertone is the product, repository (`npHavens/aftertone`) and package name. It
 
 - Available scripts: `npm run dev`, `npm run build`, `npm run start`, `npm run typecheck`, `npm test` (Node 24 gateway and selection/recovery tests), `npm run test:browser` (requires the local frontend).
 - Run `npm run check` for ESLint, Prettier, TypeScript and gateway tests; `npm run check:backend` for Ruff and pytest. Fix findings before adding more features. VS Code uses format-on-save plus ESLint/Ruff safe fixes.
+- CI (`.github/workflows/checks.yml`) runs those checks, the build and the browser tests on pull requests and pushes to `main`. Keep it free of secrets and live services, and pin actions to full commit SHAs.
 - Keep code simple: descriptive names, short cohesive functions and components, early returns, readable multiline control flow. Avoid compressed one-line implementations, speculative abstractions and blanket lint-rule disables.
 - Report frontend gateway tests, backend tests, browser checks and live-provider checks separately.
 - For implementation, add focused tests for auth/session boundaries, recognition validation, cancellation, provider failures, and duplicate prevention. Add browser coverage of both complete provider flows.
