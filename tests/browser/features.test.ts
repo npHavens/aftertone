@@ -429,7 +429,9 @@ test('a cancelled Spotify connection explains what happened', async () => {
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     await page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Connect Spotify' }).isEnabled(), true);
+    // The notice can render before the reloaded page has fetched its session, which keeps the
+    // button disabled until then, so wait for it to become enabled.
+    await page.getByRole('button', { name: 'Connect Spotify', disabled: false }).waitFor();
   } finally {
     await context.close();
   }
