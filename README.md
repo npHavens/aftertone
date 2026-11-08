@@ -54,7 +54,7 @@ Claude also reviews pull requests against the Code Review Rules in `AGENTS.md` a
 
 Write straightforward code with descriptive names and focused functions/components. Avoid dense one-line control flow, unnecessary abstractions, and disabling lint rules to hide findings. User-maintained agent settings, historical plans, generated assets and secrets are excluded from formatting.
 
-ESLint is pinned to 9.39.5 because the installed React/JSX accessibility plugins still require ESLint 9; ESLint 10 was checked and is incompatible with those plugins. Revisit that pin when their compatibility changes. Existing Next.js 16.2.6 dependency advisories require a separate tested framework update; this tooling setup does not claim the dependency tree is audit-clean.
+ESLint is pinned to 9.39.5 because the installed React/JSX accessibility plugins still require ESLint 9; ESLint 10 was checked and is incompatible with those plugins. Revisit that pin when their compatibility changes. The current dependency audit status is under [known limits](docs/local-progress.md#known-limits-and-follow-up).
 
 ## Implementation status
 
