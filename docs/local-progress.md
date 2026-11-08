@@ -1,6 +1,6 @@
 # Aftertone local progress
 
-Updated October 25, 2026. Work remains local, with no deployment or cloud provisioning.
+Updated November 8, 2026. Work remains local, with no deployment or cloud provisioning.
 
 ## Implemented
 
@@ -28,7 +28,7 @@ See [backend setup](../backend/README.md) for configuration and [the project REA
 - Local publishing uses one backend worker. It has no distributed queue or automatic reconciliation of uncertain writes.
 - Preflight checks each track individually: Spotify Development Mode removed batch track lookup, so checks run eight at a time. Apple Music's batch song lookup is a follow-up once Apple credentials allow live testing. Spotify token refresh uses one process-wide lock, which suits the local single-user backend.
 - Publish records outlive their session, so an unknown outcome can always be re-checked while signed in. It stays frozen in the browser until checked or acknowledged; inspect the provider library before attempting a new playlist. Recovery across expired authorization needs further product work.
-- The current Next.js 16.2.6 dependency advisories need a separate, tested framework upgrade. ESLint stays on version 9 until the React/accessibility plugins support version 10.
+- Next.js is on 16.4.5, and production dependencies are audit-clean as of November 8, 2026. A moderate dev-only advisory remains for `minimatch` 7.0.0–11.0.0: `@typescript-eslint/typescript-estree` still requires `minimatch` ^10.2.2, so the fixed 11.x can't be installed. The 3.x copies ESLint uses are outside the affected range. ESLint stays on version 9 until the React/accessibility plugins support version 10.
 - AI-generated playlists remain a future feature. Final vector/monochrome logo assets remain brand follow-up work.
 
 ## Local verification

@@ -205,6 +205,7 @@ export default function Home() {
                     disabled={loading || !session?.capabilities.spotify || connecting}
                     onClick={() => {
                       setConnecting(true);
+                      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a route handler that redirects to Spotify, not a page; OAuth needs a full-page navigation
                       window.location.assign('/api/auth/spotify/login');
                     }}
                   >
