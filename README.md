@@ -52,7 +52,7 @@ GitHub Actions ([`.github/workflows/checks.yml`](.github/workflows/checks.yml)) 
 
 Write straightforward code with descriptive names and focused functions/components. Avoid dense one-line control flow, unnecessary abstractions, and disabling lint rules to hide findings. User-maintained agent settings, historical plans, generated assets and secrets are excluded from formatting.
 
-ESLint is pinned to 9.39.5 because the installed React/JSX accessibility plugins still require ESLint 9; ESLint 10 was checked and is incompatible with those plugins. Revisit that pin when their compatibility changes. Existing Next.js 16.2.6 dependency advisories require a separate tested framework update; this tooling setup does not claim the dependency tree is audit-clean.
+ESLint is pinned to 9.39.5 because the installed React/JSX accessibility plugins still require ESLint 9; ESLint 10 was checked and is incompatible with those plugins. Revisit that pin when their compatibility changes. As of November 8, 2026, `npm audit --omit=dev` is clean on Next.js 16.4.5. A moderate dev-only `minimatch` advisory remains inside `typescript-eslint`, which does not yet allow the fixed `minimatch` 11.
 
 ## Implementation status
 
