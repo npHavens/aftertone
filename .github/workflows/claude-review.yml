@@ -1,11 +1,9 @@
 name: Claude review
 
-# The review job lives in claude-review-reusable.yml. Another repo uses this same caller
-# with `uses: npHavens/commercial-breaker/.github/workflows/claude-review-reusable.yml@<full SHA>`.
-# When moving that pin, confirm the SHA is on this repo's main. This must print identical or
-# ahead; behind or diverged means it is not on main, so stop:
-#   gh api repos/npHavens/commercial-breaker/compare/<sha>...main --jq .status
-# and check the triggers and permissions here against the reusable workflow at that SHA.
+# The gate and review jobs live in commercial-breaker's claude-review-reusable.yml.
+# Outside that repo, set `uses:` below to
+#   npHavens/commercial-breaker/.github/workflows/claude-review-reusable.yml@main
+# and keep the triggers, permissions and job-level if: matching commercial-breaker's caller.
 on:
   pull_request:
     types: [opened, ready_for_review]
@@ -14,14 +12,16 @@ on:
 
 jobs:
   claude-review:
-    # Skips the job for comments that cannot be a request; the called gate still decides.
+    # Skips bots and non-collaborators cheaply; the called gate owns the trigger phrase.
     if: >-
-      github.event_name == 'pull_request'
-      || (github.event.issue.pull_request && contains(github.event.comment.body, '@claude review'))
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft)
+      || (github.event.issue.pull_request
+        && github.event.comment.user.type != 'Bot'
+        && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     # The called workflow's token cannot exceed these.
     permissions:
       contents: read
       pull-requests: write
-    uses: npHavens/commercial-breaker/.github/workflows/claude-review-reusable.yml@cf89a40b761b44675dc4891d83385d312530e117 # commercial-breaker PR #20 merge
+    uses: npHavens/commercial-breaker/.github/workflows/claude-review-reusable.yml@main
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
