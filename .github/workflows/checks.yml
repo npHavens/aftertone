@@ -43,9 +43,13 @@ jobs:
           npm run test:browser
 
   backend:
-    name: Backend
+    name: Backend (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      matrix:
+        # The minimum in backend/pyproject.toml and the local development version.
+        python: ['3.11', '3.12']
     env:
       # Fail instead of rewriting backend/uv.lock when it no longer matches pyproject.toml.
       UV_LOCKED: 1
@@ -53,11 +57,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Only runs the npm script, which calls uv; no Node dependencies are installed.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          python-version: '3.12'
+          # The uv release used locally; bump both together.
+          version: '0.11.16'
+          python-version: ${{ matrix.python }}
+      # The runner's preinstalled npm only runs the script, which calls uv.
       - run: npm run check:backend
