@@ -50,7 +50,7 @@ npm run build          # Verify the production frontend build locally
 
 GitHub Actions ([`.github/workflows/checks.yml`](.github/workflows/checks.yml)) runs `npm run check`, `npm run build`, the browser tests against that production build and `npm run check:backend` (on Python 3.11 and 3.12) on every pull request and push to `main`. It needs no secrets.
 
-Claude also reviews each non-draft pull request against the Code Review Rules in `AGENTS.md` and comments with its findings ([`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml)). A collaborator can request another review by commenting `@claude review`.
+Claude also reviews pull requests against the Code Review Rules in `AGENTS.md` and comments with its findings ([`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml)). It runs once when a pull request from a branch in this repository is opened or marked ready for review. Later pushes and pull requests from forks are reviewed only on request: a collaborator comments `@claude review` in the pull request's conversation.
 
 Write straightforward code with descriptive names and focused functions/components. Avoid dense one-line control flow, unnecessary abstractions, and disabling lint rules to hide findings. User-maintained agent settings, historical plans, generated assets and secrets are excluded from formatting.
 
