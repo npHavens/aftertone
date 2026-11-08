@@ -1,7 +1,7 @@
 name: Claude review
 
-# The review job lives in commercial-breaker's claude-review-reusable.yml. It is pinned by
-# full commit SHA, so a change there reaches this repo only when the pin moves.
+# The gate and review jobs live in commercial-breaker's claude-review-reusable.yml. It is
+# pinned by full commit SHA, so a change there reaches this repo only when the pin moves.
 on:
   pull_request:
     types: [opened, ready_for_review]
