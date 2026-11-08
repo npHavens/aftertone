@@ -1,0 +1,63 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR's superseded pushes are cancelled. Each commit on main gets its own group, because a
+  # shared group would drop a pending run when the next merge lands; every main commit is checked.
+  group: checks-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: 1
+
+# The local verification commands. Browser tests intercept every API request and stub MusicKit,
+# so no job needs secrets, a running backend or a music account.
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps --only-shell chromium
+      - name: Browser tests against the production build
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port 3000 &
+          timeout 60 bash -c 'until curl -sf http://127.0.0.1:3000 > /dev/null; do sleep 1; done'
+          npm run test:browser
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Fail instead of rewriting backend/uv.lock when it no longer matches pyproject.toml.
+      UV_LOCKED: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Only runs the npm script, which calls uv; no Node dependencies are installed.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: '3.12'
+      - run: npm run check:backend
