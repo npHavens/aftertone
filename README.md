@@ -48,7 +48,7 @@ npm run test:browser   # Browser regressions; local frontend must be running
 npm run build          # Verify the production frontend build locally
 ```
 
-GitHub Actions ([`.github/workflows/checks.yml`](.github/workflows/checks.yml)) runs `npm run check`, `npm run build`, the browser tests against that production build and `npm run check:backend` on every pull request and push to `main`. It needs no secrets.
+GitHub Actions ([`.github/workflows/checks.yml`](.github/workflows/checks.yml)) runs `npm run check`, `npm run build`, the browser tests against that production build and `npm run check:backend` (on Python 3.11 and 3.12) on every pull request and push to `main`. It needs no secrets.
 
 Write straightforward code with descriptive names and focused functions/components. Avoid dense one-line control flow, unnecessary abstractions, and disabling lint rules to hide findings. User-maintained agent settings, historical plans, generated assets and secrets are excluded from formatting.
 
