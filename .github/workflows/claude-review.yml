@@ -30,7 +30,7 @@ jobs:
       id-token: write
     steps:
       # Checks out the PR head for reading only; nothing from the PR is built or run.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
           fetch-depth: 1
@@ -39,7 +39,7 @@ jobs:
       # Runs the same built-in /code-review skill and effort as the local merge-gate review.
       # The action posts with the Claude GitHub App's token, which can write to the repo,
       # so the tools stay limited to reading the PR and commenting on it.
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: /code-review high ${{ github.event.pull_request.number || github.event.issue.number }} --comment --max-findings all
