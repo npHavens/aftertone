@@ -1,8 +1,11 @@
 <!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
 <!-- END:nextjs-agent-rules -->
 
 # Aftertone
@@ -20,7 +23,7 @@ Aftertone is the product, repository (`npHavens/aftertone`) and package name. It
 
 ## Current repository
 
-- Next.js 16.2.6, React 19.2.4, TypeScript, Tailwind CSS 4, Framer Motion.
+- Next.js 16.4.5, React 19.2.4, TypeScript, Tailwind CSS 4, Framer Motion.
 - Local frontend plus FastAPI backend under `backend/`. The active page uses `useSession`, `useScanner`, `usePublishOperation` and `lib/api.ts`; old `lib/mock-recognition.ts` / `hooks/usePlaylist.ts` remain historical prototype code and are not the live integration path. Provider adapters require configured credentials and live acceptance testing.
 - Shared types: `types/index.ts`; root alias: `@/*`. CSS theme: `app/globals.css`; no Tailwind JS config.
 - Preserve the live-state getter/ref used by the scanner queue. Preserve object-URL cleanup on removal/reset and add cleanup/cancellation when changing those flows.
