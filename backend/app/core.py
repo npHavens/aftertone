@@ -196,11 +196,17 @@ class RateLimiter:
     def __init__(self, window=60):
         self.window = window
         self.hits = {}
+        self.pruned_at = float("-inf")
 
     def hit(self, key, maximum, now=None):
         now = time.time() if now is None else now
-        # Drop keys whose newest hit left the window, so abandoned sessions don't accumulate.
-        self.hits = {k: times for k, times in self.hits.items() if now - times[-1] < self.window}
+        # Once per window, drop keys whose newest hit left it, so abandoned sessions don't
+        # accumulate and the map isn't rebuilt on every request.
+        if now - self.pruned_at >= self.window:
+            self.hits = {
+                k: times for k, times in self.hits.items() if now - times[-1] < self.window
+            }
+            self.pruned_at = now
         recent = [t for t in self.hits.get(key, []) if now - t < self.window]
         if len(recent) >= maximum:
             raise Problem(

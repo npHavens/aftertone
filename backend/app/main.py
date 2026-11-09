@@ -330,7 +330,9 @@ def create_app(settings=None):
 
     @app.get("/api/albums/{album_id}")
     async def album(request: Request, album_id: str):
-        return await providers.album(session_for(request), album_id)
+        session = session_for(request)
+        throttle(session, "catalog", 60)
+        return await providers.album(session, album_id)
 
     # After a successful identification, catalog failures degrade to manual review instead of
     # failing the photo (which would repeat the model call on retry). Authorization failures
@@ -440,6 +442,3 @@ def create_app(settings=None):
         return op
 
     return app
-
-
-app = create_app()
