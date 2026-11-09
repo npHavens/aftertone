@@ -7,7 +7,7 @@ From this directory:
 ```sh
 uv sync --python 3.11
 cp .env.example .env
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn --factory app.main:create_app --host 127.0.0.1 --port 8000
 ```
 
 Keep one worker: SQLite and process-local refresh/recognition locks are intended for local development. The frontend gateway runs at `http://127.0.0.1:3000`; use that hostname consistently. Register the exact Spotify callback shown in `.env.example`.
@@ -22,7 +22,7 @@ Publishing validates canonical tracks, deduplicates first occurrences, and persi
 
 `GET /api/session` includes a stable, non-secret `sessionScope` for browser recovery storage. It changes when authorization rotates the session or a session expires. An expired session mutation returns `401 unauthenticated`; provider authorization failures return `401 provider_authorization` so the browser can reconnect.
 
-Publish `failed` means no playlist write succeeded or remains uncertain; its `code` and `message` explain the failure. `needs_attention` preserves the known playlist URL and confirmed `addedCount`, which excludes an uncertain batch. Neither status automatically replays writes. Publish records last at least as long as the owner session, so a live session can always re-check its publish; a record that has expired returns `410 operation_expired` and its key stays blocked. An unexpected error during publishing never leaves an operation `processing`: before any write it is `failed`, after that `needs_attention`. Spotify sign-in always returns to the app, with `?connection=cancelled`, `expired` or `failed` when it does not complete. Database initialization and interrupted-operation recovery run at application startup, not module import.
+Publish `failed` means no playlist write succeeded or remains uncertain; its `code` and `message` explain the failure. `needs_attention` preserves the known playlist URL and confirmed `addedCount`, which excludes an uncertain batch. Neither status automatically replays writes. Publish records last at least as long as the owner session, so a live session can always re-check its publish; a record that has expired returns `410 operation_expired` and its key stays blocked. An unexpected error during publishing never leaves an operation `processing`: before any write it is `failed`, after that `needs_attention`. Spotify sign-in always returns to the app, with `?connection=cancelled`, `expired` or `failed` when it does not complete. If the backend can't be reached or rejects the sign-in request, the frontend gateway returns to the app with `?connection=unavailable`. Database initialization and interrupted-operation recovery run at application startup, not module import. uvicorn builds the app with `--factory`, so importing `app.main`, as the tests do, never reads `.env`.
 
 Tooling:
 

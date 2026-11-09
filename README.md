@@ -21,7 +21,7 @@ npm run dev -- --hostname 127.0.0.1
 ```
 
 ```sh
-uv run --project backend uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+uv run --project backend uvicorn --factory app.main:create_app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
 Open **http://127.0.0.1:3000**. Use this hostname consistently for cookies and OAuth callbacks. The browser calls the Next.js `/api` gateway, which only forwards to the local backend. Override its default port with `AFTERTONE_BACKEND_ORIGIN` in an ignored `.env.local` if needed.

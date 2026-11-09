@@ -1,6 +1,9 @@
 import asyncio
 import io
+import subprocess
+import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -757,7 +760,7 @@ def test_publish_record_lasts_as_long_as_the_session(tmp_path, monkeypatch):
         assert client.get("/api/playlist-operations/" + op["id"]).json()["id"] == op["id"]
 
 
-def test_rate_limiter_enforces_the_window_and_drops_stale_keys():
+def test_rate_limiter_enforces_the_window_and_drops_stale_keys_once_per_window():
     limiter = RateLimiter(window=60)
     limiter.hit("abandoned", 2, now=0)
     limiter.hit("active", 2, now=50)
@@ -766,8 +769,46 @@ def test_rate_limiter_enforces_the_window_and_drops_stale_keys():
         limiter.hit("active", 2, now=59)
     limiter.hit("other", 2, now=100)
     assert set(limiter.hits) == {"active", "other"}
+    # "active" is stale by now, but the last prune was less than a window ago.
     limiter.hit("other", 2, now=130)
+    assert set(limiter.hits) == {"active", "other"}
+    limiter.hit("other", 2, now=160)
     assert set(limiter.hits) == {"other"}
+
+
+def test_album_loads_share_the_catalog_rate_limit(setup):
+    app, client = setup
+    connect(app, client)
+    loads = []
+
+    def album_response(request):
+        loads.append(request.url.path)
+        return httpx.Response(200, json=spotify_album("album1", with_tracks=True))
+
+    app.state.providers.http = catalog(album_response)
+    for _ in range(60):
+        assert client.get("/api/albums/album1").status_code == 200
+    assert client.get("/api/albums/album1").json()["code"] == "rate_limited"
+    assert client.get("/api/albums/search", params={"q": "Nevermind"}).status_code == 429
+    assert len(loads) == 60
+
+
+def test_importing_the_app_module_never_reads_the_env_file():
+    # A fresh interpreter, because this test process has already imported app.main.
+    script = """
+import app.core
+
+def fail(*args, **kwargs):
+    raise AssertionError("importing app.main read .env")
+
+app.core.load_dotenv = fail
+import app.main
+"""
+    backend = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=backend, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def apple_settings(tmp_path):
