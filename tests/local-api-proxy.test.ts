@@ -63,3 +63,24 @@ test('reports backend downtime as a retryable setup state', async () => {
   assert.equal(result.status, 503);
   assert.equal((await result.json()).code, 'BACKEND_UNAVAILABLE');
 });
+
+test('sends Spotify sign-in failures back to the app instead of showing JSON', async () => {
+  const backendDown = (async () => {
+    throw new Error('connection refused');
+  }) as typeof fetch;
+  const rateLimited = (async () =>
+    Response.json({ code: 'rate_limited' }, { status: 429 })) as typeof fetch;
+  const failures: [string[], string | undefined, typeof fetch][] = [
+    [['auth', 'spotify', 'login'], undefined, backendDown],
+    [['auth', 'spotify', 'login'], undefined, rateLimited],
+    [['auth', 'spotify', 'login'], 'https://example.com', backendDown],
+    [['auth', 'spotify', 'callback'], undefined, backendDown],
+  ];
+  for (const [path, backendOrigin, upstream] of failures) {
+    const request = new Request(`http://127.0.0.1:3000/api/${path.join('/')}`);
+    const result = await proxyLocalApi(request, path, backendOrigin, upstream);
+    assert.equal(result.status, 303);
+    assert.equal(result.headers.get('location'), '/?connection=unavailable');
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+  }
+});
