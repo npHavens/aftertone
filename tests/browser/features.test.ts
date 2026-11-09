@@ -401,7 +401,15 @@ async function connectionPage(
     }
   });
   await page.goto(origin);
+  await waitForSessionLoaded(page);
   return { page, context };
+}
+
+// The Connect buttons stay disabled until the page's session request settles.
+async function waitForSessionLoaded(page: Page) {
+  await page.getByRole('status').filter({ hasText: 'Checking your connection' }).waitFor({
+    state: 'hidden',
+  });
 }
 
 function spotifyReturn(outcome: string) {
@@ -424,13 +432,59 @@ test('spotify: connecting from a signed-out session returns to the connected app
   }
 });
 
-test('a cancelled Spotify connection explains what happened', async () => {
+test('a cancelled Spotify connection explains what happened once', async () => {
   const { page, context } = await connectionPage(spotifyReturn('connection=cancelled'));
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
-    await page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' }).waitFor();
-    // The notice can render before the reloaded page has fetched its session, which keeps the
-    // button disabled until then, so wait for it to become enabled.
+    const notice = page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' });
+    await notice.waitFor();
+    await waitForSessionLoaded(page);
+    await page.getByRole('button', { name: 'Connect Spotify', disabled: false }).waitFor();
+    await page.waitForFunction(() => !new URLSearchParams(location.search).has('connection'));
+    await page.reload();
+    await waitForSessionLoaded(page);
+    assert.equal(await notice.count(), 0);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a connection notice clears once another service connects', async () => {
+  const cancelSpotify = spotifyReturn('connection=cancelled');
+  const { page, context } = await connectionPage(async (route, path, state) => {
+    if (await cancelSpotify(route, path, state)) return true;
+    if (path !== '/api/auth/apple/session') return false;
+    state.service = 'apple-music';
+    await route.fulfill({ json: { authenticated: true, service: 'apple-music' } });
+    return true;
+  });
+  try {
+    await page.getByRole('button', { name: 'Connect Spotify' }).click();
+    const notice = page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' });
+    await notice.waitFor();
+    await waitForSessionLoaded(page);
+    await page.getByRole('button', { name: 'Connect Apple Music' }).click();
+    await page.getByText("You're connected to Apple Music.", { exact: false }).waitFor();
+    await notice.waitFor({ state: 'hidden' });
+  } finally {
+    await context.close();
+  }
+});
+
+test('a page restored from the back/forward cache re-enables the Connect buttons', async () => {
+  // A 204 keeps the browser on this page, as if it had already left for Spotify's sign-in.
+  const { page, context } = await connectionPage(async (route, path) => {
+    if (path !== '/api/auth/spotify/login') return false;
+    await route.fulfill({ status: 204 });
+    return true;
+  });
+  try {
+    await page.getByRole('button', { name: 'Connect Spotify' }).click();
+    await page.getByRole('button', { name: 'Connect Spotify', disabled: true }).waitFor();
+    // Playwright's Chromium never restores pages from that cache, so send the event it would fire.
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
     await page.getByRole('button', { name: 'Connect Spotify', disabled: false }).waitFor();
   } finally {
     await context.close();

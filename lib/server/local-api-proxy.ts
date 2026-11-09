@@ -12,6 +12,10 @@ const routes: Record<string, RegExp[]> = {
   DELETE: [/^session$/],
 };
 
+// The browser loads these in the whole tab, so a failure must return to the app's connection
+// notice instead of replacing the page with a JSON error.
+const signInRoutes = /^auth\/spotify\/(login|callback)$/;
+
 const maxBodyBytes = 10 * 1024 * 1024 + 64 * 1024;
 
 function error(code: string, message: string, status: number, retryable = false) {
@@ -31,6 +35,23 @@ export async function proxyLocalApi(
   upstreamFetch: typeof fetch = fetch,
 ) {
   const route = path.join('/');
+  const response = await forward(request, route, backendOrigin, upstreamFetch);
+  const signInFailed =
+    request.method === 'GET' && signInRoutes.test(route) && response.status >= 400;
+  if (!signInFailed) return response;
+  await response.body?.cancel();
+  return new Response(null, {
+    status: 303,
+    headers: { Location: '/?connection=unavailable', 'Cache-Control': 'no-store' },
+  });
+}
+
+async function forward(
+  request: Request,
+  route: string,
+  backendOrigin: string,
+  upstreamFetch: typeof fetch,
+) {
   if (!routes[request.method]?.some((pattern) => pattern.test(route))) {
     return error('NOT_FOUND', 'This API route is not available.', 404);
   }

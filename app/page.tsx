@@ -67,6 +67,15 @@ export default function Home() {
       cancelled = true;
     };
   }, [kitLoaded, session?.capabilities.appleMusic]);
+  useEffect(() => {
+    // Back from Spotify's sign-in page can restore this page from the back/forward cache with
+    // the Connect buttons still disabled.
+    function resetRestoredPage(event: PageTransitionEvent) {
+      if (event.persisted) setConnecting(false);
+    }
+    window.addEventListener('pageshow', resetRestoredPage);
+    return () => window.removeEventListener('pageshow', resetRestoredPage);
+  }, []);
   async function connectApple() {
     if (!window.MusicKit || !kitReady || connecting) return;
     setConnecting(true);
@@ -143,7 +152,7 @@ export default function Home() {
         </span>
       </header>
       <main id="workspace">
-        <ConnectionReturnNotice />
+        <ConnectionReturnNotice connected={!!session?.authenticated} />
         <Hero />
         <nav className="steps" aria-label="Playlist creation steps">
           {['Connect', 'Add photos', 'Review matches', 'Make a playlist'].map((label, index) => (
