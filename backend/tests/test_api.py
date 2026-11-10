@@ -128,9 +128,11 @@ def test_spotify_login_returns_every_failure_to_the_app(setup, tmp_path):
 def test_page_loads_do_not_use_up_spotify_sign_in_attempts(setup):
     app, client = setup
     client.get("/api/session")
-    # Each page load fetches the Apple developer token, including every return from Spotify.
-    for _ in range(10):
-        client.get("/api/auth/apple/developer-token")
+    # With Apple Music configured, each page load fetches its developer token, including every
+    # return from Spotify. The token has its own limit of 30 a minute.
+    for _ in range(30):
+        assert client.get("/api/auth/apple/developer-token").status_code != 429
+    assert client.get("/api/auth/apple/developer-token").json()["code"] == "rate_limited"
     location = client.get("/api/auth/spotify/login", follow_redirects=False).headers["location"]
     assert location.startswith("https://accounts.spotify.com/authorize?")
 
@@ -804,30 +806,46 @@ def test_a_failed_track_check_starts_no_more_checks_and_leaves_none_running(setu
     assert in_flight == 0
 
 
-def test_a_failed_preflight_reports_the_earliest_failed_track(setup):
-    app, client = setup
-    connect(app, client)
+def test_a_failed_preflight_reports_the_earliest_failed_track(setup, monkeypatch):
+    app, _ = setup
+    providers = app.state.providers
+    track3_failed = asyncio.Event()
 
-    async def upstream(request):
-        if request.method != "GET":
-            return spotify_writes(request)
-        track_id = request.url.path.rsplit("/", 1)[-1]
-        if track_id == "track0":
-            # Fails after track3 does, so finishing order and playlist order differ.
-            await asyncio.sleep(0.02)
-            return httpx.Response(200, json={"id": track_id, "is_playable": False})
+    async def validate_track(session, track_id):
         if track_id == "track3":
-            return httpx.Response(404)
-        return httpx.Response(200, json={"id": track_id})
+            # Sets the event and raises in one step, so track3's failure is recorded first.
+            track3_failed.set()
+            raise Problem("provider_rejected", "The music service rejected this request.", 502)
+        if track_id == "track0":
+            await track3_failed.wait()
+            raise Problem("unavailable_track", "A selected track is unavailable.")
 
-    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
-    response = client.post(
-        "/api/playlists",
-        json={"name": "Test", "trackIds": [f"track{i}" for i in range(10)]},
-        headers={**csrf(client), "Idempotency-Key": "earliest-failure-key"},
-    )
-    assert response.json()["status"] == "failed"
-    assert response.json()["code"] == "unavailable_track"
+    monkeypatch.setattr(providers, "validate_track", validate_track)
+    with pytest.raises(Problem) as raised:
+        asyncio.run(providers.validate_tracks({}, [f"track{i}" for i in range(10)]))
+    assert raised.value.code == "unavailable_track"
+
+
+def test_track_checks_all_finish_before_an_unexpected_error_is_raised(setup, monkeypatch):
+    app, _ = setup
+    providers = app.state.providers
+    in_flight = 0
+
+    class Interrupted(BaseException):
+        pass
+
+    async def validate_track(session, track_id):
+        nonlocal in_flight
+        if track_id == "track1":
+            raise Interrupted()
+        in_flight += 1
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+
+    monkeypatch.setattr(providers, "validate_track", validate_track)
+    with pytest.raises(Interrupted):
+        asyncio.run(providers.validate_tracks({}, [f"track{i}" for i in range(10)]))
+    assert in_flight == 0
 
 
 @pytest.mark.parametrize("phase, expected", [("preflight", "failed"), ("write", "needs_attention")])

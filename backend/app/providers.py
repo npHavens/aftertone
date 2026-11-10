@@ -290,13 +290,17 @@ class Providers:
                 except Exception as error:
                     failures.append((index, error))
 
-        # Workers don't raise for a failed check, so gather waits for every running check and none
-        # is left running. A failure doesn't cancel them either: one may be saving a refreshed
-        # Spotify token.
-        await asyncio.gather(*(worker() for _ in range(VALIDATION_CONCURRENCY)))
+        # Failed checks are collected, and return_exceptions holds back anything else a worker
+        # raises until the others finish, so none is left running. A failure doesn't cancel the
+        # running checks either: one may be saving a refreshed Spotify token.
+        results = await asyncio.gather(
+            *(worker() for _ in range(VALIDATION_CONCURRENCY)), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
         if failures:
-            # Report the earliest track's failure, as fixed batches did, regardless of which check
-            # finished first.
+            # Report the earliest track's failure, regardless of which check finished first.
             _, error = min(failures)
             raise error
 
