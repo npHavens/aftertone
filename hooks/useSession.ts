@@ -25,6 +25,8 @@ export function useSession() {
         if (!controller.signal.aborted) setLoading(false);
       });
   }, []);
+  // Resolves when this check settles, or at once if a newer check replaces it. The newer check
+  // then applies the session and keeps `loading` set until it does.
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
