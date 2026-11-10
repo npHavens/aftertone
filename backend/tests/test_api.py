@@ -125,6 +125,16 @@ def test_spotify_login_returns_every_failure_to_the_app(setup, tmp_path):
     assert response.headers["location"] == ORIGIN + "/?connection=setup"
 
 
+def test_page_loads_do_not_use_up_spotify_sign_in_attempts(setup):
+    app, client = setup
+    client.get("/api/session")
+    # Each page load fetches the Apple developer token, including every return from Spotify.
+    for _ in range(10):
+        client.get("/api/auth/apple/developer-token")
+    location = client.get("/api/auth/spotify/login", follow_redirects=False).headers["location"]
+    assert location.startswith("https://accounts.spotify.com/authorize?")
+
+
 def start_spotify_login(app, client):
     client.get("/api/session")
     client.get("/api/auth/spotify/login", follow_redirects=False)
