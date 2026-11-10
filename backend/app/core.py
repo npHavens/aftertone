@@ -199,7 +199,7 @@ class RateLimiter:
         self.pruned_at = float("-inf")
 
     def hit(self, key, maximum, now=None):
-        now = time.time() if now is None else now
+        now = time.monotonic() if now is None else now
         # Once per window, drop keys whose newest hit left it, so abandoned sessions don't
         # accumulate and the map isn't rebuilt on every request.
         if now - self.pruned_at >= self.window:

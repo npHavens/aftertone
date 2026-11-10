@@ -1,8 +1,12 @@
+// The browser loads these in the whole tab, so a failure must return to the app's connection
+// notice instead of replacing the page with a JSON error.
+const signInRoute = /^auth\/spotify\/(login|callback)$/;
+
 // Intentionally restricted to local development. This is not an open proxy.
 const routes: Record<string, RegExp[]> = {
   GET: [
     /^session$/,
-    /^auth\/spotify\/(login|callback)$/,
+    signInRoute,
     /^auth\/apple\/developer-token$/,
     /^albums\/search$/,
     /^albums\/[A-Za-z0-9_-]+$/,
@@ -11,10 +15,6 @@ const routes: Record<string, RegExp[]> = {
   POST: [/^auth\/apple\/session$/, /^recognize$/, /^playlists$/],
   DELETE: [/^session$/],
 };
-
-// The browser loads these in the whole tab, so a failure must return to the app's connection
-// notice instead of replacing the page with a JSON error.
-const signInRoutes = /^auth\/spotify\/(login|callback)$/;
 
 const maxBodyBytes = 10 * 1024 * 1024 + 64 * 1024;
 
@@ -37,12 +37,15 @@ export async function proxyLocalApi(
   const route = path.join('/');
   const response = await forward(request, route, backendOrigin, upstreamFetch);
   const signInFailed =
-    request.method === 'GET' && signInRoutes.test(route) && response.status >= 400;
+    request.method === 'GET' && signInRoute.test(route) && response.status >= 400;
   if (!signInFailed) return response;
-  await response.body?.cancel();
+  // The backend returns its own sign-in failures to the app, so these come from the gateway or
+  // an unexpected backend error. Only an invalid backend origin can't be fixed by retrying.
+  const { code } = await response.json().catch(() => ({}));
+  const outcome = code === 'LOCAL_CONFIG_INVALID' ? 'setup' : 'unavailable';
   return new Response(null, {
     status: 303,
-    headers: { Location: '/?connection=unavailable', 'Cache-Control': 'no-store' },
+    headers: { Location: `/?connection=${outcome}`, 'Cache-Control': 'no-store' },
   });
 }
 

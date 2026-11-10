@@ -613,6 +613,46 @@ test('disconnecting after the session expired returns to signed out', async () =
   }
 });
 
+test('an older session check never replaces a newer one', async () => {
+  const held: Route[] = [];
+  let checks = 0;
+  const { page, context } = await connectionPage(async (route, path, state) => {
+    if (path !== '/api/session') return false;
+    if (route.request().method() === 'DELETE') {
+      state.service = null;
+      await route.fulfill({ json: { disconnected: true } });
+      return true;
+    }
+    checks += 1;
+    if (checks === 2) {
+      await route.fulfill({
+        status: 503,
+        json: { code: 'unavailable', message: 'The connection check failed.' },
+      });
+      return true;
+    }
+    if (checks === 3) {
+      held.push(route);
+      return true;
+    }
+    return false;
+  }, 'spotify');
+  try {
+    // A failed check after disconnecting keeps the signed-in page and offers a retry, so retrying
+    // and then disconnecting again runs two checks at once.
+    await page.getByRole('button', { name: 'Disconnect' }).click();
+    await page.getByRole('button', { name: 'Retry connection check' }).click();
+    await until(() => held.length === 1);
+    await page.getByRole('button', { name: 'Disconnect' }).click();
+    await page.getByRole('button', { name: 'Connect Spotify' }).waitFor();
+    await release(held, sessionJson('spotify'));
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    assert.equal(await page.getByText("You're connected to Spotify.", { exact: false }).count(), 0);
+  } finally {
+    await context.close();
+  }
+});
+
 test('a known operation the server no longer has can be acknowledged', async () => {
   let publishes = 0;
   const { page, context } = await fixturePage(async (route, path) => {
@@ -643,7 +683,7 @@ test('a known operation the server no longer has can be acknowledged', async () 
   }
 });
 
-// Recognition responses held until the test releases them, to simulate slow model calls.
+// Responses held until the test releases them, to simulate slow requests.
 async function release(held: Route[], result: unknown) {
   for (const route of held.splice(0)) {
     // A request the page already aborted can't be fulfilled; that is the point of the test.
