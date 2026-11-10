@@ -69,13 +69,15 @@ export default function Home() {
   }, [kitLoaded, session?.capabilities.appleMusic]);
   useEffect(() => {
     // Back from Spotify's sign-in page can restore this page from the back/forward cache with
-    // the Connect buttons still disabled.
+    // the Connect buttons still disabled and the session from before any sign-in there.
     function resetRestoredPage(event: PageTransitionEvent) {
-      if (event.persisted) setConnecting(false);
+      if (!event.persisted) return;
+      setConnecting(false);
+      void refresh();
     }
     window.addEventListener('pageshow', resetRestoredPage);
     return () => window.removeEventListener('pageshow', resetRestoredPage);
-  }, []);
+  }, [refresh]);
   async function connectApple() {
     if (!window.MusicKit || !kitReady || connecting) return;
     setConnecting(true);

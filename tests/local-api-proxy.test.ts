@@ -70,9 +70,11 @@ test('sends Spotify sign-in failures back to the app instead of showing JSON', a
   }) as typeof fetch;
   const backendCrashed = (async () =>
     new Response('Internal Server Error', { status: 500 })) as typeof fetch;
+  const nullBody = (async () => Response.json(null, { status: 500 })) as typeof fetch;
   const failures: [string[], string | undefined, typeof fetch, string][] = [
     [['auth', 'spotify', 'login'], undefined, backendDown, 'unavailable'],
     [['auth', 'spotify', 'login'], undefined, backendCrashed, 'unavailable'],
+    [['auth', 'spotify', 'login'], undefined, nullBody, 'unavailable'],
     [['auth', 'spotify', 'login'], 'https://example.com', backendDown, 'setup'],
     [['auth', 'spotify', 'callback'], undefined, backendDown, 'unavailable'],
   ];

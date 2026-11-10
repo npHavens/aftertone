@@ -812,13 +812,15 @@ def test_album_loads_share_the_catalog_rate_limit(setup):
 
 def test_importing_the_app_module_never_reads_the_env_file():
     # A fresh interpreter, because this test process has already imported app.main.
+    # dotenv is patched before any app module imports it, so every way of loading .env fails.
     script = """
-import app.core
+import dotenv
+import dotenv.main
 
 def fail(*args, **kwargs):
     raise AssertionError("importing app.main read .env")
 
-app.core.load_dotenv = fail
+dotenv.load_dotenv = dotenv.main.load_dotenv = fail
 import app.main
 """
     backend = Path(__file__).resolve().parents[1]

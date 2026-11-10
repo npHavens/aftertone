@@ -471,21 +471,42 @@ test('a connection notice clears once another service connects', async () => {
   }
 });
 
-test('a page restored from the back/forward cache re-enables the Connect buttons', async () => {
-  // A 204 keeps the browser on this page, as if it had already left for Spotify's sign-in.
-  const { page, context } = await connectionPage(async (route, path) => {
+// A 204 keeps the browser on this page, as if it had left for Spotify's sign-in. The test then
+// returns with Back, optionally after signing in there.
+function backFromSpotify(signedIn: boolean) {
+  return async (route: Route, path: string, state: SignInState) => {
     if (path !== '/api/auth/spotify/login') return false;
+    if (signedIn) state.service = 'spotify';
     await route.fulfill({ status: 204 });
     return true;
+  };
+}
+
+// Playwright's Chromium never restores pages from that cache, so send the event it would fire.
+async function restoreFromBackForwardCache(page: Page) {
+  await page.getByRole('button', { name: 'Connect Spotify', disabled: true }).waitFor();
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
+}
+
+test('a page restored from the back/forward cache re-enables the Connect buttons', async () => {
+  const { page, context } = await connectionPage(backFromSpotify(false));
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
-    await page.getByRole('button', { name: 'Connect Spotify', disabled: true }).waitFor();
-    // Playwright's Chromium never restores pages from that cache, so send the event it would fire.
-    await page.evaluate(() => {
-      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-    });
+    await restoreFromBackForwardCache(page);
     await page.getByRole('button', { name: 'Connect Spotify', disabled: false }).waitFor();
+  } finally {
+    await context.close();
+  }
+});
+
+test('a page restored from the back/forward cache shows a sign-in finished meanwhile', async () => {
+  const { page, context } = await connectionPage(backFromSpotify(true));
+  try {
+    await page.getByRole('button', { name: 'Connect Spotify' }).click();
+    await restoreFromBackForwardCache(page);
+    await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
   } finally {
     await context.close();
   }

@@ -41,8 +41,8 @@ export async function proxyLocalApi(
   if (!signInFailed) return response;
   // The backend returns its own sign-in failures to the app, so these come from the gateway or
   // an unexpected backend error. Only an invalid backend origin can't be fixed by retrying.
-  const { code } = await response.json().catch(() => ({}));
-  const outcome = code === 'LOCAL_CONFIG_INVALID' ? 'setup' : 'unavailable';
+  const body = await response.json().catch(() => null);
+  const outcome = body?.code === 'LOCAL_CONFIG_INVALID' ? 'setup' : 'unavailable';
   return new Response(null, {
     status: 303,
     headers: { Location: `/?connection=${outcome}`, 'Cache-Control': 'no-store' },
