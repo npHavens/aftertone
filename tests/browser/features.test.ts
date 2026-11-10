@@ -441,9 +441,30 @@ test('a cancelled Spotify connection explains what happened once', async () => {
     await waitForSessionLoaded(page);
     await page.getByRole('button', { name: 'Connect Spotify', disabled: false }).waitFor();
     await page.waitForFunction(() => !new URLSearchParams(location.search).has('connection'));
+    assert.equal(await notice.count(), 1);
     await page.reload();
     await waitForSessionLoaded(page);
     assert.equal(await notice.count(), 0);
+  } finally {
+    await context.close();
+  }
+});
+
+test('every connection outcome the backend or gateway sends has a notice', async () => {
+  const notices = {
+    cancelled: 'Connection was cancelled.',
+    expired: 'That connection attempt expired.',
+    failed: 'The music service did not complete the connection.',
+    unavailable: 'Aftertone could not connect your music service right now.',
+    rate_limited: 'Too many connection attempts.',
+    setup: 'Aftertone is not set up to connect this music service.',
+  };
+  const { page, context } = await connectionPage(async () => false);
+  try {
+    for (const [outcome, text] of Object.entries(notices)) {
+      await page.goto(`${origin}/?connection=${outcome}`);
+      await page.getByRole('alert').filter({ hasText: text }).waitFor();
+    }
   } finally {
     await context.close();
   }
