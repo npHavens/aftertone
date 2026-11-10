@@ -275,16 +275,26 @@ class Providers:
         raise Problem("provider_error", "Album track pagination exceeded the safety limit.", 502)
 
     async def validate_tracks(self, session, ids):
-        for start in range(0, len(ids), VALIDATION_CONCURRENCY):
-            batch = ids[start : start + VALIDATION_CONCURRENCY]
-            # Let every check in the batch settle before raising, so none is left running.
-            results = await asyncio.gather(
-                *(self.validate_track(session, track_id) for track_id in batch),
-                return_exceptions=True,
-            )
-            for result in results:
-                if isinstance(result, BaseException):
-                    raise result
+        # Each finished check frees a slot for the next track, so a slow track never holds back
+        # the ones after it.
+        slots = asyncio.Semaphore(VALIDATION_CONCURRENCY)
+        failures = []
+
+        async def check(track_id):
+            async with slots:
+                # After a failure, tracks still waiting for a slot are never checked.
+                if failures:
+                    return
+                try:
+                    await self.validate_track(session, track_id)
+                except Exception as error:
+                    failures.append(error)
+
+        # Failures are collected rather than raised, so gather waits for every running check and
+        # none is left running after this returns.
+        await asyncio.gather(*(check(track_id) for track_id in ids))
+        if failures:
+            raise failures[0]
 
     async def validate_track(self, session, track_id):
         if session["data"]["service"] == "spotify":
