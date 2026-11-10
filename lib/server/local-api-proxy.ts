@@ -1,8 +1,12 @@
+// The browser loads these in the whole tab, so a failure must return to the app's connection
+// notice instead of replacing the page with a JSON error.
+const signInRoute = /^auth\/spotify\/(login|callback)$/;
+
 // Intentionally restricted to local development. This is not an open proxy.
 const routes: Record<string, RegExp[]> = {
   GET: [
     /^session$/,
-    /^auth\/spotify\/(login|callback)$/,
+    signInRoute,
     /^auth\/apple\/developer-token$/,
     /^albums\/search$/,
     /^albums\/[A-Za-z0-9_-]+$/,
@@ -31,6 +35,26 @@ export async function proxyLocalApi(
   upstreamFetch: typeof fetch = fetch,
 ) {
   const route = path.join('/');
+  const response = await forward(request, route, backendOrigin, upstreamFetch);
+  const signInFailed =
+    request.method === 'GET' && signInRoute.test(route) && response.status >= 400;
+  if (!signInFailed) return response;
+  // The backend returns its own sign-in failures to the app, so these come from the gateway or
+  // an unexpected backend error. Only an invalid backend origin can't be fixed by retrying.
+  const body = await response.json().catch(() => null);
+  const outcome = body?.code === 'LOCAL_CONFIG_INVALID' ? 'setup' : 'unavailable';
+  return new Response(null, {
+    status: 303,
+    headers: { Location: `/?connection=${outcome}`, 'Cache-Control': 'no-store' },
+  });
+}
+
+async function forward(
+  request: Request,
+  route: string,
+  backendOrigin: string,
+  upstreamFetch: typeof fetch,
+) {
   if (!routes[request.method]?.some((pattern) => pattern.test(route))) {
     return error('NOT_FOUND', 'This API route is not available.', 404);
   }

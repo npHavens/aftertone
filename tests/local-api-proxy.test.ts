@@ -63,3 +63,26 @@ test('reports backend downtime as a retryable setup state', async () => {
   assert.equal(result.status, 503);
   assert.equal((await result.json()).code, 'BACKEND_UNAVAILABLE');
 });
+
+test('sends Spotify sign-in failures back to the app instead of showing JSON', async () => {
+  const backendDown = (async () => {
+    throw new Error('connection refused');
+  }) as typeof fetch;
+  const backendCrashed = (async () =>
+    new Response('Internal Server Error', { status: 500 })) as typeof fetch;
+  const nullBody = (async () => Response.json(null, { status: 500 })) as typeof fetch;
+  const failures: [string[], string | undefined, typeof fetch, string][] = [
+    [['auth', 'spotify', 'login'], undefined, backendDown, 'unavailable'],
+    [['auth', 'spotify', 'login'], undefined, backendCrashed, 'unavailable'],
+    [['auth', 'spotify', 'login'], undefined, nullBody, 'unavailable'],
+    [['auth', 'spotify', 'login'], 'https://example.com', backendDown, 'setup'],
+    [['auth', 'spotify', 'callback'], undefined, backendDown, 'unavailable'],
+  ];
+  for (const [path, backendOrigin, upstream, outcome] of failures) {
+    const request = new Request(`http://127.0.0.1:3000/api/${path.join('/')}`);
+    const result = await proxyLocalApi(request, path, backendOrigin, upstream);
+    assert.equal(result.status, 303);
+    assert.equal(result.headers.get('location'), `/?connection=${outcome}`);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+  }
+});

@@ -1,6 +1,9 @@
 import asyncio
 import io
+import subprocess
+import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -103,6 +106,33 @@ def test_oauth_state_is_one_use(setup):
         follow_redirects=False,
     )
     assert reused.headers["location"] == ORIGIN + "/?connection=expired"
+
+
+def test_spotify_login_returns_every_failure_to_the_app(setup, tmp_path):
+    app, client = setup
+
+    def login():
+        return client.get("/api/auth/spotify/login", follow_redirects=False).headers["location"]
+
+    assert login() == ORIGIN + "/?connection=expired"
+    client.get("/api/session")
+    for _ in range(10):
+        assert login().startswith("https://accounts.spotify.com/authorize?")
+    assert login() == ORIGIN + "/?connection=rate_limited"
+    unconfigured = create_app(Settings(store_path=str(tmp_path / "unconfigured.sqlite3")))
+    with TestClient(unconfigured) as other:
+        response = other.get("/api/auth/spotify/login", follow_redirects=False)
+    assert response.headers["location"] == ORIGIN + "/?connection=setup"
+
+
+def test_page_loads_do_not_use_up_spotify_sign_in_attempts(setup):
+    app, client = setup
+    client.get("/api/session")
+    # Each page load fetches the Apple developer token, including every return from Spotify.
+    for _ in range(10):
+        client.get("/api/auth/apple/developer-token")
+    location = client.get("/api/auth/spotify/login", follow_redirects=False).headers["location"]
+    assert location.startswith("https://accounts.spotify.com/authorize?")
 
 
 def start_spotify_login(app, client):
@@ -757,7 +787,7 @@ def test_publish_record_lasts_as_long_as_the_session(tmp_path, monkeypatch):
         assert client.get("/api/playlist-operations/" + op["id"]).json()["id"] == op["id"]
 
 
-def test_rate_limiter_enforces_the_window_and_drops_stale_keys():
+def test_rate_limiter_enforces_the_window_and_drops_stale_keys_once_per_window():
     limiter = RateLimiter(window=60)
     limiter.hit("abandoned", 2, now=0)
     limiter.hit("active", 2, now=50)
@@ -766,8 +796,61 @@ def test_rate_limiter_enforces_the_window_and_drops_stale_keys():
         limiter.hit("active", 2, now=59)
     limiter.hit("other", 2, now=100)
     assert set(limiter.hits) == {"active", "other"}
+    # "active" is stale by now, but the last prune was less than a window ago.
     limiter.hit("other", 2, now=130)
+    assert set(limiter.hits) == {"active", "other"}
+    limiter.hit("other", 2, now=160)
     assert set(limiter.hits) == {"other"}
+
+
+def test_rate_limiter_windows_follow_the_monotonic_clock(monkeypatch):
+    # A stopped wall clock, as during a correction that moved it back, must not hold a window open.
+    monkeypatch.setattr(time, "time", lambda: 1_000.0)
+    elapsed = 0.0
+    monkeypatch.setattr(time, "monotonic", lambda: elapsed)
+    limiter = RateLimiter(window=60)
+    limiter.hit("session", 1)
+    elapsed = 61.0
+    limiter.hit("session", 1)
+
+
+def test_album_loads_have_their_own_rate_limit(setup):
+    app, client = setup
+    connect(app, client)
+    loads = []
+
+    def album_response(request):
+        loads.append(request.url.path)
+        return httpx.Response(200, json=spotify_album("album1", with_tracks=True))
+
+    app.state.providers.http = catalog(album_response)
+    for _ in range(60):
+        assert client.get("/api/albums/search", params={"q": "Nevermind"}).status_code == 200
+    assert client.get("/api/albums/search", params={"q": "Nevermind"}).status_code == 429
+    for _ in range(30):
+        assert client.get("/api/albums/album1").status_code == 200
+    assert client.get("/api/albums/album1").json()["code"] == "rate_limited"
+    assert len(loads) == 30
+
+
+def test_importing_the_app_module_never_reads_the_env_file():
+    # A fresh interpreter, because this test process has already imported app.main.
+    # dotenv is patched before any app module imports it, so every way of loading .env fails.
+    script = """
+import dotenv
+import dotenv.main
+
+def fail(*args, **kwargs):
+    raise AssertionError("importing app.main read .env")
+
+dotenv.load_dotenv = dotenv.main.load_dotenv = fail
+import app.main
+"""
+    backend = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=backend, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def apple_settings(tmp_path):
