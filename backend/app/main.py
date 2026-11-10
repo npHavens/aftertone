@@ -203,8 +203,9 @@ def create_app(settings=None):
         # The browser arrives here by navigation, so every outcome returns to the app.
         if not settings.capabilities()["spotify"]:
             return connection_return("setup")
-        session = store.get(request.cookies.get(COOKIE))
-        if not session:
+        try:
+            session = session_for(request, False)
+        except Problem:
             return connection_return("expired")
         try:
             throttle(session, "connect", 10)
@@ -333,7 +334,8 @@ def create_app(settings=None):
     @app.get("/api/albums/{album_id}")
     async def album(request: Request, album_id: str):
         session = session_for(request)
-        throttle(session, "catalog", 60)
+        # Separate from search, so searching while fixing matches can't block confirming one.
+        throttle(session, "album", 30)
         return await providers.album(session, album_id)
 
     # After a successful identification, catalog failures degrade to manual review instead of

@@ -793,7 +793,18 @@ def test_rate_limiter_enforces_the_window_and_drops_stale_keys_once_per_window()
     assert set(limiter.hits) == {"other"}
 
 
-def test_album_loads_share_the_catalog_rate_limit(setup):
+def test_rate_limiter_windows_follow_the_monotonic_clock(monkeypatch):
+    # A stopped wall clock, as during a correction that moved it back, must not hold a window open.
+    monkeypatch.setattr(time, "time", lambda: 1_000.0)
+    elapsed = 0.0
+    monkeypatch.setattr(time, "monotonic", lambda: elapsed)
+    limiter = RateLimiter(window=60)
+    limiter.hit("session", 1)
+    elapsed = 61.0
+    limiter.hit("session", 1)
+
+
+def test_album_loads_have_their_own_rate_limit(setup):
     app, client = setup
     connect(app, client)
     loads = []
@@ -804,10 +815,12 @@ def test_album_loads_share_the_catalog_rate_limit(setup):
 
     app.state.providers.http = catalog(album_response)
     for _ in range(60):
+        assert client.get("/api/albums/search", params={"q": "Nevermind"}).status_code == 200
+    assert client.get("/api/albums/search", params={"q": "Nevermind"}).status_code == 429
+    for _ in range(30):
         assert client.get("/api/albums/album1").status_code == 200
     assert client.get("/api/albums/album1").json()["code"] == "rate_limited"
-    assert client.get("/api/albums/search", params={"q": "Nevermind"}).status_code == 429
-    assert len(loads) == 60
+    assert len(loads) == 30
 
 
 def test_importing_the_app_module_never_reads_the_env_file():

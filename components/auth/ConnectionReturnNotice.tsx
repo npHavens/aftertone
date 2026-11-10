@@ -1,6 +1,6 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 // Outcomes a provider sign-in redirect sends back, from the backend or the local API proxy.
 const connectionMessages = new Map([
@@ -22,6 +22,8 @@ type Props = { connected: boolean };
 
 function ReturnNotice({ connected }: Props) {
   const params = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
   // Read once, because the parameter is removed below so that a reload doesn't repeat it.
   const [message, setMessage] = useState(() =>
     connectionMessages.get(params.get('connection') ?? ''),
@@ -29,11 +31,14 @@ function ReturnNotice({ connected }: Props) {
   // A later connection makes the notice out of date, and it stays dismissed after disconnecting.
   if (connected && message) setMessage(undefined);
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('connection')) return;
-    url.searchParams.delete('connection');
-    window.history.replaceState(null, '', url);
-  }, []);
+    if (!params.has('connection')) return;
+    // Through the router, not history.replaceState: on the first render this effect runs before
+    // the router hooks into history, so the router would keep the old URL and restore it later.
+    const remaining = new URLSearchParams(params);
+    remaining.delete('connection');
+    const search = remaining.toString();
+    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+  }, [params, pathname, router]);
   if (!message) return null;
   return (
     <div className="alert" role="alert">
