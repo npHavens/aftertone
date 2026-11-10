@@ -200,14 +200,17 @@ def create_app(settings=None):
 
     @app.get("/api/auth/spotify/login")
     async def spotify_login(request: Request):
+        # The browser arrives here by navigation, so every outcome returns to the app.
         if not settings.capabilities()["spotify"]:
-            raise Problem(
-                "setup_required",
-                "Configure Spotify client ID, exact redirect URI and server encryption key.",
-                503,
-            )
-        session = session_for(request, False)
-        throttle(session, "connect", 10)
+            return connection_return("setup")
+        try:
+            session = session_for(request, False)
+        except Problem:
+            return connection_return("expired")
+        try:
+            throttle(session, "connect", 10)
+        except Problem:
+            return connection_return("rate_limited")
         verifier, state = secrets.token_urlsafe(64), secrets.token_urlsafe(32)
         session["data"]["oauth"] = {
             "state": state,
@@ -286,7 +289,8 @@ def create_app(settings=None):
     @app.get("/api/auth/apple/developer-token")
     async def apple_token(request: Request):
         session = session_for(request, False)
-        throttle(session, "connect", 10)
+        # Every page load fetches this, so it doesn't count against sign-in attempts.
+        throttle(session, "developer_token", 30)
         return {
             "developerToken": providers.developer_token(browser=True),
             "app": {"name": "Aftertone", "build": "1"},
@@ -330,7 +334,10 @@ def create_app(settings=None):
 
     @app.get("/api/albums/{album_id}")
     async def album(request: Request, album_id: str):
-        return await providers.album(session_for(request), album_id)
+        session = session_for(request)
+        # Separate from search, so searching while fixing matches can't block confirming one.
+        throttle(session, "album", 30)
+        return await providers.album(session, album_id)
 
     # After a successful identification, catalog failures degrade to manual review instead of
     # failing the photo (which would repeat the model call on retry). Authorization failures
@@ -440,6 +447,3 @@ def create_app(settings=None):
         return op
 
     return app
-
-
-app = create_app()
