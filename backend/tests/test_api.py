@@ -747,6 +747,89 @@ def test_preflight_checks_tracks_concurrently_within_a_bound(setup):
     assert 1 < peak <= 8
 
 
+def test_a_slow_track_check_does_not_hold_back_later_tracks(setup):
+    app, client = setup
+    connect(app, client)
+    later_track_started = asyncio.Event()
+
+    async def upstream(request):
+        if request.method != "GET":
+            return spotify_writes(request)
+        track_id = request.url.path.rsplit("/", 1)[-1]
+        if track_id == "track8":
+            later_track_started.set()
+        if track_id == "track0":
+            await asyncio.wait_for(later_track_started.wait(), timeout=2)
+        return httpx.Response(200, json={"id": track_id})
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.post(
+        "/api/playlists",
+        json={"name": "Test", "trackIds": [f"track{i}" for i in range(20)]},
+        headers={**csrf(client), "Idempotency-Key": "slow-track-key"},
+    )
+    assert response.json()["status"] == "completed"
+
+
+def test_a_failed_track_check_starts_no_more_checks_and_leaves_none_running(setup):
+    app, client = setup
+    connect(app, client)
+    checked = []
+    in_flight = 0
+
+    async def upstream(request):
+        nonlocal in_flight
+        if request.method != "GET":
+            return spotify_writes(request)
+        track_id = request.url.path.rsplit("/", 1)[-1]
+        checked.append(track_id)
+        if track_id == "track0":
+            # Fails while the other first checks are still waiting on the provider.
+            await asyncio.sleep(0.01)
+            return httpx.Response(200, json={"id": track_id, "is_playable": False})
+        in_flight += 1
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        return httpx.Response(200, json={"id": track_id})
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.post(
+        "/api/playlists",
+        json={"name": "Test", "trackIds": [f"track{i}" for i in range(20)]},
+        headers={**csrf(client), "Idempotency-Key": "failed-track-key"},
+    )
+    assert response.json()["status"] == "failed"
+    assert response.json()["code"] == "unavailable_track"
+    assert len(checked) <= 8
+    assert in_flight == 0
+
+
+def test_a_failed_preflight_reports_the_earliest_failed_track(setup):
+    app, client = setup
+    connect(app, client)
+
+    async def upstream(request):
+        if request.method != "GET":
+            return spotify_writes(request)
+        track_id = request.url.path.rsplit("/", 1)[-1]
+        if track_id == "track0":
+            # Fails after track3 does, so finishing order and playlist order differ.
+            await asyncio.sleep(0.02)
+            return httpx.Response(200, json={"id": track_id, "is_playable": False})
+        if track_id == "track3":
+            return httpx.Response(404)
+        return httpx.Response(200, json={"id": track_id})
+
+    app.state.providers.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    response = client.post(
+        "/api/playlists",
+        json={"name": "Test", "trackIds": [f"track{i}" for i in range(10)]},
+        headers={**csrf(client), "Idempotency-Key": "earliest-failure-key"},
+    )
+    assert response.json()["status"] == "failed"
+    assert response.json()["code"] == "unavailable_track"
+
+
 @pytest.mark.parametrize("phase, expected", [("preflight", "failed"), ("write", "needs_attention")])
 def test_unexpected_errors_never_leave_a_publish_processing(setup, phase, expected):
     app, client = setup
