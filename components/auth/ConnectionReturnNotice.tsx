@@ -11,6 +11,11 @@ const connectionMessages = new Map([
     'unavailable',
     'Aftertone could not connect your music service right now. Please try again in a minute.',
   ],
+  ['rate_limited', 'Too many connection attempts. Wait a minute and try again.'],
+  [
+    'setup',
+    'Aftertone is not set up to connect this music service. Check the local server configuration.',
+  ],
 ]);
 
 type Props = { connected: boolean };

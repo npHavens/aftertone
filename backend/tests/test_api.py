@@ -108,6 +108,23 @@ def test_oauth_state_is_one_use(setup):
     assert reused.headers["location"] == ORIGIN + "/?connection=expired"
 
 
+def test_spotify_login_returns_every_failure_to_the_app(setup, tmp_path):
+    app, client = setup
+
+    def login():
+        return client.get("/api/auth/spotify/login", follow_redirects=False).headers["location"]
+
+    assert login() == ORIGIN + "/?connection=expired"
+    client.get("/api/session")
+    for _ in range(10):
+        assert login().startswith("https://accounts.spotify.com/authorize?")
+    assert login() == ORIGIN + "/?connection=rate_limited"
+    unconfigured = create_app(Settings(store_path=str(tmp_path / "unconfigured.sqlite3")))
+    with TestClient(unconfigured) as other:
+        response = other.get("/api/auth/spotify/login", follow_redirects=False)
+    assert response.headers["location"] == ORIGIN + "/?connection=setup"
+
+
 def start_spotify_login(app, client):
     client.get("/api/session")
     client.get("/api/auth/spotify/login", follow_redirects=False)

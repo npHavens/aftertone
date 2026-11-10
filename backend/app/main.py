@@ -200,14 +200,16 @@ def create_app(settings=None):
 
     @app.get("/api/auth/spotify/login")
     async def spotify_login(request: Request):
+        # The browser arrives here by navigation, so every outcome returns to the app.
         if not settings.capabilities()["spotify"]:
-            raise Problem(
-                "setup_required",
-                "Configure Spotify client ID, exact redirect URI and server encryption key.",
-                503,
-            )
-        session = session_for(request, False)
-        throttle(session, "connect", 10)
+            return connection_return("setup")
+        session = store.get(request.cookies.get(COOKIE))
+        if not session:
+            return connection_return("expired")
+        try:
+            throttle(session, "connect", 10)
+        except Problem:
+            return connection_return("rate_limited")
         verifier, state = secrets.token_urlsafe(64), secrets.token_urlsafe(32)
         session["data"]["oauth"] = {
             "state": state,
