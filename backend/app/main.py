@@ -289,7 +289,8 @@ def create_app(settings=None):
     @app.get("/api/auth/apple/developer-token")
     async def apple_token(request: Request):
         session = session_for(request, False)
-        # Every page load fetches this, so it doesn't count against sign-in attempts.
+        # The page fetches this on every load when Apple Music is configured, so it doesn't count
+        # against sign-in attempts.
         throttle(session, "developer_token", 30)
         return {
             "developerToken": providers.developer_token(browser=True),
