@@ -849,8 +849,41 @@ def test_an_unexpected_error_starts_no_more_checks_and_leaves_none_running(setup
     monkeypatch.setattr(providers, "validate_track", validate_track)
     with pytest.raises(Interrupted):
         asyncio.run(providers.validate_tracks({}, [f"track{i}" for i in range(20)]))
-    assert len(checked) <= 8
+    # Track1 fails before the other workers take their first track, so none of them starts one.
+    assert checked == ["track0", "track1"]
     assert in_flight == 0
+
+
+def test_cancelling_a_publish_during_preflight_waits_for_running_checks(setup, monkeypatch):
+    app, client = setup
+    session = connect(app, client)
+    store, providers = app.state.store, app.state.providers
+    payload = {"name": "Test", "trackIds": [f"track{i}" for i in range(8)]}
+    op, _ = store.begin_operation(session["id"], "cancel-key-123", payload)
+    in_flight = 0
+
+    async def validate_track(session, track_id):
+        nonlocal in_flight
+        in_flight += 1
+        try:
+            await asyncio.sleep(1)
+        finally:
+            # Each check takes a different time to unwind, like one saving a refreshed token.
+            await asyncio.sleep(0.01 * (int(track_id.removeprefix("track")) + 1))
+            in_flight -= 1
+
+    async def cancel_publish():
+        task = asyncio.create_task(providers.publish(session, op, payload))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return in_flight
+
+    monkeypatch.setattr(providers, "validate_track", validate_track)
+    assert asyncio.run(cancel_publish()) == 0
+    stored = store.get_operation(op["id"], session["id"])
+    assert (stored["status"], stored["code"]) == ("failed", "cancelled")
 
 
 @pytest.mark.parametrize("phase, expected", [("preflight", "failed"), ("write", "needs_attention")])
