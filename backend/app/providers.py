@@ -289,10 +289,15 @@ class Providers:
                     await self.validate_track(session, track_id)
                 except Exception as error:
                     failures.append((index, error))
+                except BaseException as error:
+                    # Anything else, such as cancellation, also stops new checks and is still raised.
+                    failures.append((index, error))
+                    raise
 
-        # Failed checks are collected, and return_exceptions holds back anything else a worker
-        # raises until the others finish, so none is left running. A failure doesn't cancel the
-        # running checks either: one may be saving a refreshed Spotify token.
+        # A failure doesn't cancel the running checks, because one may be saving a refreshed
+        # Spotify token. With return_exceptions, gather also waits for them before an error a
+        # worker raised is raised here, so none is left running. KeyboardInterrupt and SystemExit
+        # are different: they stop the event loop at once.
         results = await asyncio.gather(
             *(worker() for _ in range(VALIDATION_CONCURRENCY)), return_exceptions=True
         )

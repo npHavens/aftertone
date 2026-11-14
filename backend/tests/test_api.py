@@ -125,16 +125,18 @@ def test_spotify_login_returns_every_failure_to_the_app(setup, tmp_path):
     assert response.headers["location"] == ORIGIN + "/?connection=setup"
 
 
-def test_page_loads_do_not_use_up_spotify_sign_in_attempts(setup):
-    app, client = setup
-    client.get("/api/session")
-    # With Apple Music configured, each page load fetches its developer token, including every
-    # return from Spotify. The token has its own limit of 30 a minute.
-    for _ in range(30):
-        assert client.get("/api/auth/apple/developer-token").status_code != 429
-    assert client.get("/api/auth/apple/developer-token").json()["code"] == "rate_limited"
-    location = client.get("/api/auth/spotify/login", follow_redirects=False).headers["location"]
-    assert location.startswith("https://accounts.spotify.com/authorize?")
+def test_page_loads_do_not_use_up_spotify_sign_in_attempts(tmp_path):
+    settings, _ = apple_settings(tmp_path)
+    settings.spotify_id = "test"
+    with TestClient(create_app(settings)) as client:
+        client.get("/api/session")
+        # Each page load fetches the Apple developer token, including every return from Spotify.
+        # The token has its own limit of 30 a minute.
+        for _ in range(30):
+            assert client.get("/api/auth/apple/developer-token").status_code == 200
+        assert client.get("/api/auth/apple/developer-token").json()["code"] == "rate_limited"
+        login = client.get("/api/auth/spotify/login", follow_redirects=False)
+    assert login.headers["location"].startswith("https://accounts.spotify.com/authorize?")
 
 
 def start_spotify_login(app, client):
@@ -826,9 +828,10 @@ def test_a_failed_preflight_reports_the_earliest_failed_track(setup, monkeypatch
     assert raised.value.code == "unavailable_track"
 
 
-def test_track_checks_all_finish_before_an_unexpected_error_is_raised(setup, monkeypatch):
+def test_an_unexpected_error_starts_no_more_checks_and_leaves_none_running(setup, monkeypatch):
     app, _ = setup
     providers = app.state.providers
+    checked = []
     in_flight = 0
 
     class Interrupted(BaseException):
@@ -836,6 +839,7 @@ def test_track_checks_all_finish_before_an_unexpected_error_is_raised(setup, mon
 
     async def validate_track(session, track_id):
         nonlocal in_flight
+        checked.append(track_id)
         if track_id == "track1":
             raise Interrupted()
         in_flight += 1
@@ -844,7 +848,8 @@ def test_track_checks_all_finish_before_an_unexpected_error_is_raised(setup, mon
 
     monkeypatch.setattr(providers, "validate_track", validate_track)
     with pytest.raises(Interrupted):
-        asyncio.run(providers.validate_tracks({}, [f"track{i}" for i in range(10)]))
+        asyncio.run(providers.validate_tracks({}, [f"track{i}" for i in range(20)]))
+    assert len(checked) <= 8
     assert in_flight == 0
 
 
