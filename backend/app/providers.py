@@ -294,8 +294,8 @@ class Providers:
                         raise
 
         # A failure doesn't cancel the running checks, because one may be saving a refreshed
-        # Spotify token. With return_exceptions, gather waits for every check to finish before it
-        # raises a worker's error or the publish's cancellation, so none is left running.
+        # Spotify token. With return_exceptions, gather waits until every check has stopped before
+        # it raises a worker's error or the publish's cancellation, so none is left running.
         # KeyboardInterrupt and SystemExit are different: they stop the event loop at once.
         results = await asyncio.gather(
             *(worker() for _ in range(VALIDATION_CONCURRENCY)), return_exceptions=True
