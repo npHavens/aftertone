@@ -808,7 +808,7 @@ def test_a_failed_track_check_starts_no_more_checks_and_leaves_none_running(setu
     assert in_flight == 0
 
 
-def test_a_failed_preflight_reports_the_earliest_failed_track(setup, monkeypatch):
+def test_track_checks_report_the_earliest_failed_track(setup, monkeypatch):
     app, _ = setup
     providers = app.state.providers
     track3_failed = asyncio.Event()
@@ -849,7 +849,8 @@ def test_an_unexpected_error_starts_no_more_checks_and_leaves_none_running(setup
     monkeypatch.setattr(providers, "validate_track", validate_track)
     with pytest.raises(Interrupted):
         asyncio.run(providers.validate_tracks({}, [f"track{i}" for i in range(20)]))
-    # Track1 fails before the other workers take their first track, so none of them starts one.
+    # Track1 fails before the remaining workers check a track: each takes one from the list and
+    # returns without checking it.
     assert checked == ["track0", "track1"]
     assert in_flight == 0
 
