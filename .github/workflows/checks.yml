@@ -22,7 +22,9 @@ env:
 jobs:
   frontend:
     name: Frontend
-    runs-on: ubuntu-latest
+    # ubuntu-latest became Ubuntu 26.04 in November 2026, and Playwright 1.60 can't install its
+    # browser there. Playwright 1.65 can, so this can go back to ubuntu-latest after an upgrade.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
