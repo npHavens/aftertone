@@ -60,11 +60,11 @@ Aftertone is the product, repository (`npHavens/aftertone`) and package name. It
 
 ## Merge gate
 
-Before asking Nick to merge, follow the [shared merge gate](https://github.com/npHavens/.github/blob/main/review/merge-gate.md). Aftertone's exceptions:
+Before asking Nick to merge, follow the [shared merge gate](https://github.com/npHavens/.github/blob/main/review/merge-gate.md). Nick merges; agents never merge. Aftertone's exceptions:
 
 - Branch protection requires only the CI checks; `gh api repos/npHavens/aftertone/branches/main/protection/required_status_checks` lists them. The Claude review check isn't required, so read the review's summary comment rather than the check.
-- Apart from a caller change, which item 4 covers, later pushes aren't reviewed again unless Nick asks, including fixes for review findings. The merge report names the commit the Claude review covered and lists every commit pushed after it.
-- Item 5 covers the reports the Verification section asks for, including which live integrations the PR didn't exercise.
+- Apart from a caller change, which the shared gate's caller item covers, later pushes aren't reviewed again unless Nick asks, including fixes for review findings. Don't convert a PR to draft and back to get a review. The merge report names the commit the Claude review covered and lists every commit pushed after it.
+- The shared gate's extra checks are the reports the Verification section asks for, including which live integrations the PR didn't exercise.
 
 `.github/workflows/claude-review.yml` is an unchanged copy of the shared [caller](https://github.com/npHavens/.github/blob/main/review/claude-review.yml). It runs `npHavens/.github`'s `claude-review-reusable.yml` at `main`, which runs `/code-review high` with the [shared review standard](https://github.com/npHavens/.github/blob/main/review/review-standard.md) and the Code Review Rules below. The job restores `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md` and `CODE_REVIEW.md` from `main`, so a PR's edits to them don't affect its own review. Make review-job changes in `npHavens/.github`. When its caller changes, copy it here unchanged in its own PR.
 
