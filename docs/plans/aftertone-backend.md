@@ -37,14 +37,14 @@ Browser API requests stay under the frontend origin. The gateway forwards only a
 
 ## GCP setup
 
-Local `gcloud config get-value project` returned `earlier-gcp-project`. This confirms local configuration only, not billing, model permissions, or quota. Use explicit `--project` flags rather than changing the global project.
+On September 7, 2026, the machine's global `gcloud` project was set to a project other than Aftertone's. That setting confirms only local configuration, not billing, model permissions, or quota. Use explicit `--project` flags rather than changing the global project.
 
 Update, October 25, 2026: Aftertone now uses the dedicated No Hands Stack project `nhs-aftertone` with `gemini-4-argon`. See `AGENTS.md`.
 
 Before implementation rollout:
 
-- Confirm this project is the intended shared project, its billing, Vertex API access, model/region availability and quotas.
-- Use Aftertone-specific service names, service accounts, secrets, labels and store namespaces. Inspect any existing Firestore database and its immutable location before proposing another database or indexes. Leave other-project resources alone.
+- Confirm `nhs-aftertone`'s billing, Vertex API access, model/region availability and quotas.
+- Use Aftertone-specific service names, service accounts, secrets, labels and store namespaces. Inspect any existing Firestore database and its immutable location before proposing another database or indexes. Leave resources that Aftertone didn't create alone.
 - Select an available Gemini **Pro** model ID and location through a small image/schema smoke test. Require `GEMINI_MODEL` in configuration rather than guessing a default. A consumer Gemini subscription does not establish this project's API permissions.
 - Local identity: ADC. Cloud Run: dedicated attached service account with least-privilege Vertex access and access only to Aftertone secrets/store records. No downloaded service-account keys.
 - Configure request deadlines, max instances, per-session recognition limits and a budget alert. Budget alerts are notifications, not hard spending caps. Measure latency and token usage before estimating cost.
@@ -141,6 +141,6 @@ Add a prompt-to-draft input after the v1 publish path works: user prompt → Gem
 
 ## Remaining implementation prerequisites
 
-Confirm Spotify developer app and Premium status, Apple Developer Program/MusicKit key access, exact Gemini Pro availability, shared GCP resource boundaries, and frontend hosting. The user has music subscriptions; developer access has not been verified. No secrets need to be pasted into chat.
+Confirm Spotify developer app and Premium status, Apple Developer Program/MusicKit key access, exact Gemini Pro availability, GCP resource boundaries, and frontend hosting. The user has music subscriptions; developer access has not been verified. No secrets need to be pasted into chat.
 
 If Vercel is chosen for the frontend, install its currently missing CLI with `npm i -g vercel` to support `vercel env pull`, `vercel deploy`, and `vercel logs`. Vercel is not required by this GCP backend plan.
