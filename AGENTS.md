@@ -53,24 +53,24 @@ Aftertone is the product, repository (`npHavens/aftertone`) and package name. It
 - Available scripts: `npm run dev`, `npm run build`, `npm run start`, `npm run typecheck`, `npm test` (Node 24 gateway and selection/recovery tests), `npm run test:browser` (requires the local frontend).
 - Run `npm run check` for ESLint, Prettier, TypeScript and gateway tests; `npm run check:backend` for Ruff and pytest. Fix findings before adding more features. VS Code uses format-on-save plus ESLint/Ruff safe fixes.
 - CI (`.github/workflows/checks.yml`) runs those checks, the build and the browser tests on pull requests and pushes to `main`. Keep it free of secrets and live services, and pin actions to full commit SHAs.
-- Merge gate, before asking Nick to merge:
-  1. CI passes. Branch protection requires only the CI checks; `gh api repos/npHavens/aftertone/branches/main/protection/required_status_checks` lists them.
-  2. Codex is paused, because it reached its usage limit in November 2026. Skip this step until Nick removes this note. When it runs again: Codex has reviewed the final head commit; if it doesn't start on its own, post a separate PR comment that is exactly `@codex review`. Don't put that phrase in a PR description, where it triggers a bogus Codex reply. Codex's review of the final head is clean, or each finding is fixed or answered on its thread.
-  3. The GitHub Claude review runs once per PR, automatically when the PR is opened or marked ready for review, but not while it is a draft. Wait for its summary comment, which names the commit it reviewed; if none appears, check the run in the Actions tab. A skipped review job also reports success, so a green check alone doesn't prove a review ran. Fix or answer each High and Medium finding on its thread. A finding with no [High], [Medium] or [Low] label counts as Medium. Answer the Low findings in one PR comment, or move them into a follow-up issue, and don't push only to address Lows. Later pushes aren't reviewed again, so don't convert the PR to draft and back. If a later push is substantial, ask Nick whether to review it again with a PR comment that starts with `@claude review`, from an owner, member or collaborator account such as Nick's `gh` login. It runs `main`'s caller, so its check lands on `main`'s commit, not the PR's. Comments from GitHub App bots don't start it, and events caused by `GITHUB_TOKEN` start no workflow. Two cases need that comment without asking: a PR that changes `.github/workflows/claude-review.yml`, which chooses its own automatic reviewer, and the next PR after such a change merges, because the automatic run only exercises the `pull_request` path. In the second case, check that the comment runs the review job rather than skipping it.
-  4. When asking Nick to merge, report the CI and Claude results, and Codex's while it runs. Name the commit the Claude review covered and list any commits pushed after it. Say how each High and Medium finding was handled and where the Lows went. Nick merges; agents never merge. A local `/code-review high` is optional.
-- `.github/workflows/claude-review.yml` is a small caller for commercial-breaker's shared `claude-review-reusable.yml`, passing the `CLAUDE_CODE_OAUTH_TOKEN` secret. The reusable workflow runs `/code-review high` on GitHub. It replaces the PR's `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md` and `CODE_REVIEW.md` files with `main`'s copies, so a PR's edits to them don't affect its own review. The caller runs the reusable workflow at commercial-breaker's `main`, so a change merged there reaches this repo's reviews with no change here; make review-job changes in commercial-breaker. Keep the caller a copy of commercial-breaker's whole `claude-review.yml`, changing only the `uses:` line, so its header, triggers, permissions and job-level `if:` stay identical. The reusable workflow's header lists the exact `if:` callers must use. When commercial-breaker's caller changes, copy it here in its own PR; commercial-breaker holds back a reusable-workflow change that needs more from callers until every caller is updated. Runs from opening a PR or marking it ready use the PR's caller. An `@claude review` comment always runs the caller on `main`.
 - Keep code simple: descriptive names, short cohesive functions and components, early returns, readable multiline control flow. Avoid compressed one-line implementations, speculative abstractions and blanket lint-rule disables.
 - Report frontend gateway tests, backend tests, browser checks and live-provider checks separately.
 - For implementation, add focused tests for auth/session boundaries, recognition validation, cancellation, provider failures, and duplicate prevention. Add browser coverage of both complete provider flows.
 - Documentation-only changes need link/consistency checks, not an application build. Report exactly what was verified and any live integrations not exercised.
 
+## Merge gate
+
+Before asking Nick to merge, follow the [shared merge gate](https://github.com/npHavens/.github/blob/main/review/merge-gate.md). Nick merges; agents never merge. Aftertone's exceptions:
+
+- Branch protection requires only the CI checks; `gh api repos/npHavens/aftertone/branches/main/protection/required_status_checks` lists them. The Claude review check isn't required, so read the review's summary comment rather than the check.
+- Apart from a caller change, which the shared gate's caller item covers, later pushes aren't reviewed again unless Nick asks, including fixes for review findings. Don't convert a PR to draft and back to get a review. The merge report names the commit the Claude review covered and lists every commit pushed after it.
+- The shared gate's extra checks are the reports the Verification section asks for, including which live integrations the PR didn't exercise.
+
+`.github/workflows/claude-review.yml` is an unchanged copy of the shared [caller](https://github.com/npHavens/.github/blob/main/review/claude-review.yml). It runs `npHavens/.github`'s `claude-review-reusable.yml` at `main`, which runs `/code-review high` with the [shared review standard](https://github.com/npHavens/.github/blob/main/review/review-standard.md) and the Code Review Rules below. The job restores `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md` and `CODE_REVIEW.md` from `main`, so a PR's edits to them don't affect its own review. Make review-job changes in `npHavens/.github`. When its caller changes, copy it here unchanged in its own PR.
+
 ## Code Review Rules
 
-### Review standard
-
-- Review this as a codebase that will be handed to a team, not a personal script repo. Missing tests for changed behavior, misleading comments, duplicated logic, dead code and speculative abstractions are findings, not nits.
-- Report every finding you can tie to a concrete trigger and consequence; don't stop at the worst one.
-- Leave formatting and lint to tooling.
+The reviewer applies these rules together with the shared review standard.
 
 ### Playlist publishing
 
