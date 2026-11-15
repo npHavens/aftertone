@@ -1,9 +1,7 @@
 name: Claude review
 
-# The gate and review jobs live in commercial-breaker's claude-review-reusable.yml.
-# Outside that repo, set `uses:` below to
-#   npHavens/commercial-breaker/.github/workflows/claude-review-reusable.yml@main
-# and keep the triggers, permissions and job-level if: matching commercial-breaker's caller.
+# The gate and review jobs live in claude-review-reusable.yml in npHavens/.github.
+# A calling repo copies this file unchanged to .github/workflows/claude-review.yml.
 on:
   pull_request:
     types: [opened, ready_for_review]
@@ -22,6 +20,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: npHavens/commercial-breaker/.github/workflows/claude-review-reusable.yml@main
+    uses: npHavens/.github/.github/workflows/claude-review-reusable.yml@main
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
