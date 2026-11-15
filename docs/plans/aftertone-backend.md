@@ -37,14 +37,14 @@ Browser API requests stay under the frontend origin. The gateway forwards only a
 
 ## GCP setup
 
-Local `gcloud config get-value project` returned `interview-assistant-507123`. This confirms local configuration only, not billing, model permissions, or quota. Use explicit `--project` flags rather than changing the global project.
+The machine's global `gcloud` project belongs to another project, and that setting confirms only local configuration, not billing, model permissions, or quota. Use explicit `--project` flags rather than changing the global project.
 
 Update, October 25, 2026: Aftertone now uses the dedicated No Hands Stack project `nhs-aftertone` with `gemini-4-argon`. See `AGENTS.md`.
 
 Before implementation rollout:
 
 - Confirm this project is the intended shared project, its billing, Vertex API access, model/region availability and quotas.
-- Use Aftertone-specific service names, service accounts, secrets, labels and store namespaces. Inspect any existing Firestore database and its immutable location before proposing another database or indexes. Leave interview-assistant resources alone.
+- Use Aftertone-specific service names, service accounts, secrets, labels and store namespaces. Inspect any existing Firestore database and its immutable location before proposing another database or indexes. Leave other projects' resources alone.
 - Select an available Gemini **Pro** model ID and location through a small image/schema smoke test. Require `GEMINI_MODEL` in configuration rather than guessing a default. A consumer Gemini subscription does not establish this project's API permissions.
 - Local identity: ADC. Cloud Run: dedicated attached service account with least-privilege Vertex access and access only to Aftertone secrets/store records. No downloaded service-account keys.
 - Configure request deadlines, max instances, per-session recognition limits and a budget alert. Budget alerts are notifications, not hard spending caps. Measure latency and token usage before estimating cost.
