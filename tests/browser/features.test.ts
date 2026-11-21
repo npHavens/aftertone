@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { after, before, test } from 'node:test';
+import { crc32, deflateSync } from 'node:zlib';
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
 
 const origin = process.env.AFTERTONE_TEST_ORIGIN ?? 'http://127.0.0.1:3000';
-const photo = {
-  name: 'cover.png',
-  mimeType: 'image/png',
-  buffer: Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=',
-    'base64',
-  ),
-};
+// The page decodes every photo before it uploads, so this has to be a real image.
+const photo = noisyPhoto('cover.png', 1, 1);
 
 let browser: Browser;
 before(async () => {
@@ -812,6 +808,144 @@ test('a late recognition result never returns after disconnecting', async () => 
     await release(held, recognized());
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
     assert.equal(await page.locator('.album-review').count(), 0);
+  } finally {
+    await context.close();
+  }
+});
+
+function pngChunk(type: string, data: Buffer) {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, checksum]);
+}
+
+// Random pixels don't compress, so the PNG stays about as large as a phone photo saved as PNG.
+function noisyPhoto(name: string, width: number, height: number) {
+  const rowLength = 1 + width * 3;
+  const rows = randomBytes(rowLength * height);
+  // Each row starts with its filter type; 0 stores the pixels as they are.
+  for (let offset = 0; offset < rows.length; offset += rowLength) rows[offset] = 0;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8); // 8-bit RGB, no interlacing
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return {
+    name,
+    mimeType: 'image/png',
+    buffer: Buffer.concat([
+      signature,
+      pngChunk('IHDR', header),
+      pngChunk('IDAT', deflateSync(rows, { level: 1 })),
+      pngChunk('IEND', Buffer.alloc(0)),
+    ]),
+  };
+}
+
+type Upload = { type: string; size: number; width: number; height: number };
+
+// Records each photo the page uploads, measured upright as the backend reads it.
+async function recordUploads(page: Page) {
+  await page.evaluate(() => {
+    const recorded: Upload[] = [];
+    (window as unknown as { uploads: Upload[] }).uploads = recorded;
+    const send = window.fetch;
+    window.fetch = async (input, init) => {
+      const photo = init?.body instanceof FormData ? init.body.get('file') : null;
+      if (photo instanceof Blob) {
+        const upload = { type: photo.type, size: photo.size, width: 0, height: 0 };
+        try {
+          const bitmap = await createImageBitmap(photo, { imageOrientation: 'from-image' });
+          upload.width = bitmap.width;
+          upload.height = bitmap.height;
+          bitmap.close();
+        } catch {
+          // An unreadable upload is still recorded, with no size.
+        }
+        recorded.push(upload);
+      }
+      return send(input, init);
+    };
+  });
+}
+
+function uploads(page: Page) {
+  return page.evaluate(() => (window as unknown as { uploads: Upload[] }).uploads);
+}
+
+test('a photo over the upload limit is shrunk to the size Gemini sees before it uploads', async () => {
+  const { page, context } = await fixturePage(async () => false);
+  try {
+    await recordUploads(page);
+    const large = noisyPhoto('large.png', 3000, 1600);
+    assert.ok(large.buffer.length > 10 * 1024 * 1024);
+    await page.locator('input[type=file]').setInputFiles(large);
+    await page.getByText('Your review needed').waitFor();
+    const [upload] = await uploads(page);
+    assert.equal(upload.type, 'image/jpeg');
+    assert.equal(upload.width, 2048);
+    // 1600 × 2048 / 3000 is 1092.3, so either rounding keeps the shape.
+    assert.ok(Math.abs(upload.height - 1092) <= 1, `height ${upload.height}`);
+    assert.ok(upload.size < 10 * 1024 * 1024, `${upload.size} bytes`);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a small photo uploads upright at its own size', async () => {
+  const { page, context } = await fixturePage(async () => false);
+  try {
+    await recordUploads(page);
+    // A 40 × 20 JPEG whose EXIF orientation turns it a quarter turn, made with Pillow.
+    const rotated = {
+      name: 'rotated.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.from(
+        '/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAYAAAAAAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAAUACgBAREA/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/9oACAEBAAA/ACiiiiiiiiiiiiiiv//Z',
+        'base64',
+      ),
+    };
+    await page.locator('input[type=file]').setInputFiles(rotated);
+    await page.getByText('Your review needed').waitFor();
+    const [upload] = await uploads(page);
+    assert.equal(upload.type, 'image/jpeg');
+    assert.deepEqual([upload.width, upload.height], [20, 40]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a photo the browser cannot read shows an error and never uploads', async () => {
+  const { page, context } = await fixturePage(async () => false);
+  try {
+    await recordUploads(page);
+    const broken = {
+      name: 'broken.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('not a photo'),
+    };
+    await page.locator('input[type=file]').setInputFiles(broken);
+    await page.getByText('This file is not a supported, readable image.').waitFor();
+    assert.deepEqual(await uploads(page), []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a photo the browser cannot encode shows an error and never uploads', async () => {
+  const { page, context } = await fixturePage(async () => false);
+  try {
+    await recordUploads(page);
+    await page.evaluate(() => {
+      OffscreenCanvas.prototype.convertToBlob = () =>
+        Promise.reject(new DOMException('Encoding failed.', 'EncodingError'));
+    });
+    await page.locator('input[type=file]').setInputFiles(photo);
+    await page.getByText("This photo couldn't be prepared for upload. Please try again.").waitFor();
+    assert.deepEqual(await uploads(page), []);
   } finally {
     await context.close();
   }
