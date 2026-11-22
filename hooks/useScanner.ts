@@ -35,7 +35,7 @@ export function useScanner(
       const controller = new AbortController();
       controllers.current.set(item.id, controller);
       patch(item.id, { status: 'processing' });
-      void shrinkImage(item.file)
+      void shrinkImage(item.file, controller.signal)
         .then((photo) => {
           const form = new FormData();
           form.set('file', photo);

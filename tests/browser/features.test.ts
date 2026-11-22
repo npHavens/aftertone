@@ -828,10 +828,20 @@ function noisyPhoto(name: string, width: number, height: number) {
   const rows = randomBytes(rowLength * height);
   // Each row starts with its filter type; 0 stores the pixels as they are.
   for (let offset = 0; offset < rows.length; offset += rowLength) rows[offset] = 0;
+  return pngPhoto(name, width, height, 2, rows); // 8-bit RGB
+}
+
+// Every byte is zero: filter type 0, then pixels with no colour and no opacity.
+function transparentPhoto(name: string, width: number, height: number) {
+  const rows = Buffer.alloc((1 + width * 4) * height);
+  return pngPhoto(name, width, height, 6, rows); // 8-bit RGBA
+}
+
+function pngPhoto(name: string, width: number, height: number, colorType: number, rows: Buffer) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
-  header.set([8, 2, 0, 0, 0], 8); // 8-bit RGB, no interlacing
+  header.set([8, colorType, 0, 0, 0], 8); // 8 bits per channel, no interlacing
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return {
     name,
@@ -845,7 +855,7 @@ function noisyPhoto(name: string, width: number, height: number) {
   };
 }
 
-type Upload = { type: string; size: number; width: number; height: number };
+type Upload = { type: string; size: number; width: number; height: number; corner: number[] };
 
 // Records each photo the page uploads, measured upright as the backend reads it.
 async function recordUploads(page: Page) {
@@ -856,11 +866,22 @@ async function recordUploads(page: Page) {
     window.fetch = async (input, init) => {
       const photo = init?.body instanceof FormData ? init.body.get('file') : null;
       if (photo instanceof Blob) {
-        const upload = { type: photo.type, size: photo.size, width: 0, height: 0 };
+        const upload: Upload = {
+          type: photo.type,
+          size: photo.size,
+          width: 0,
+          height: 0,
+          corner: [],
+        };
         try {
           const bitmap = await createImageBitmap(photo, { imageOrientation: 'from-image' });
           upload.width = bitmap.width;
           upload.height = bitmap.height;
+          // The top-left pixel's red, green, blue and alpha.
+          const canvas = new OffscreenCanvas(1, 1);
+          const context = canvas.getContext('2d');
+          context?.drawImage(bitmap, 0, 0);
+          upload.corner = Array.from(context?.getImageData(0, 0, 1, 1).data ?? []);
           bitmap.close();
         } catch {
           // An unreadable upload is still recorded, with no size.
@@ -935,17 +956,109 @@ test('a photo the browser cannot read shows an error and never uploads', async (
   }
 });
 
-test('a photo the browser cannot encode shows an error and never uploads', async () => {
+test('a photo the browser cannot encode shows an error, never uploads, and retries', async () => {
   const { page, context } = await fixturePage(async () => false);
   try {
     await recordUploads(page);
     await page.evaluate(() => {
+      const encode = OffscreenCanvas.prototype.convertToBlob;
+      (window as unknown as { restoreEncoder: () => void }).restoreEncoder = () => {
+        OffscreenCanvas.prototype.convertToBlob = encode;
+      };
       OffscreenCanvas.prototype.convertToBlob = () =>
         Promise.reject(new DOMException('Encoding failed.', 'EncodingError'));
     });
     await page.locator('input[type=file]').setInputFiles(photo);
     await page.getByText("This photo couldn't be prepared for upload. Please try again.").waitFor();
     assert.deepEqual(await uploads(page), []);
+    await page.evaluate(() =>
+      (window as unknown as { restoreEncoder: () => void }).restoreEncoder(),
+    );
+    await page.getByRole('button', { name: 'Retry recognition' }).click();
+    await page.getByText('Your review needed').waitFor();
+    assert.deepEqual(
+      (await uploads(page)).map((upload) => upload.type),
+      ['image/jpeg'],
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+test('a long, thin photo keeps at least one pixel on its short side', async () => {
+  const { page, context } = await fixturePage(async () => false);
+  try {
+    await recordUploads(page);
+    await page.locator('input[type=file]').setInputFiles(noisyPhoto('thin.png', 1, 5000));
+    await page.getByText('Your review needed').waitFor();
+    const [upload] = await uploads(page);
+    assert.deepEqual([upload.width, upload.height], [1, 2048]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a transparent photo uploads on white, not black', async () => {
+  const { page, context } = await fixturePage(async () => false);
+  try {
+    await recordUploads(page);
+    await page.locator('input[type=file]').setInputFiles(transparentPhoto('clear.png', 8, 8));
+    await page.getByText('Your review needed').waitFor();
+    const [upload] = await uploads(page);
+    const [red, green, blue] = upload.corner;
+    assert.ok(Math.min(red, green, blue) >= 250, `corner ${upload.corner}`);
+  } finally {
+    await context.close();
+  }
+});
+
+test('removing a photo while it is being shrunk lets the next photo start', async () => {
+  let recognitions = 0;
+  const { page, context } = await fixturePage(async (_route, path) => {
+    if (path === '/api/recognize') recognitions += 1;
+    return false;
+  });
+  try {
+    // Holds every decode until the test releases them, so photos stay mid-shrink, and counts
+    // how many decoded bitmaps the page frees.
+    await page.evaluate(() => {
+      const state = { held: [] as (() => void)[], closed: 0 };
+      (window as unknown as { decodes: typeof state }).decodes = state;
+      const decode = window.createImageBitmap.bind(window);
+      window.createImageBitmap = ((source: ImageBitmapSource, options?: ImageBitmapOptions) =>
+        new Promise<ImageBitmap>((resolve, reject) => {
+          state.held.push(() => decode(source, options).then(resolve, reject));
+        })) as typeof createImageBitmap;
+      const close = ImageBitmap.prototype.close;
+      ImageBitmap.prototype.close = function () {
+        state.closed += 1;
+        close.call(this);
+      };
+    });
+    const photos = ['one.png', 'two.png', 'three.png'].map((name) => ({ ...photo, name }));
+    await page.locator('input[type=file]').setInputFiles(photos);
+    const decodes = (count: number) =>
+      page.waitForFunction(
+        (count) =>
+          (window as unknown as { decodes: { held: unknown[] } }).decodes.held.length === count,
+        count,
+      );
+    await decodes(2);
+    await page.locator('.album-review').first().getByRole('button', { name: 'Remove' }).click();
+    // The third photo takes the removed one's place before that decode finishes.
+    await decodes(3);
+    await page.evaluate(() =>
+      (window as unknown as { decodes: { held: (() => void)[] } }).decodes.held.forEach((release) =>
+        release(),
+      ),
+    );
+    await page.getByText('Your review needed').nth(1).waitFor();
+    // The removed photo's late bitmap is freed too.
+    await page.waitForFunction(
+      () => (window as unknown as { decodes: { closed: number } }).decodes.closed === 3,
+    );
+    assert.equal(await page.locator('.album-review').count(), 2);
+    assert.equal(recognitions, 2);
   } finally {
     await context.close();
   }
