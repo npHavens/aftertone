@@ -309,7 +309,7 @@ export default function Home() {
                 />
                 <small>
                   {session?.authenticated
-                    ? 'JPG, PNG or WebP · Up to 10 MB each · 20 photos'
+                    ? 'JPG, PNG or WebP · Up to 50 MB each · 20 photos'
                     : 'Connect a music service to add photos.'}
                 </small>
               </div>

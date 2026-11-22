@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import { validateImage } from '@/lib/image';
+import { shrinkImage, validateImage } from '@/lib/image';
 import type { ScanItem, RecognitionResult, ProviderAlbum } from '@/types';
 
 export function useScanner(
@@ -35,13 +35,16 @@ export function useScanner(
       const controller = new AbortController();
       controllers.current.set(item.id, controller);
       patch(item.id, { status: 'processing' });
-      const form = new FormData();
-      form.set('file', item.file);
-      void api<RecognitionResult>(
-        '/recognize',
-        { method: 'POST', body: form, signal: controller.signal },
-        credentials.current.csrf,
-      )
+      void shrinkImage(item.file, controller.signal)
+        .then((photo) => {
+          const form = new FormData();
+          form.set('file', photo);
+          return api<RecognitionResult>(
+            '/recognize',
+            { method: 'POST', body: form, signal: controller.signal },
+            credentials.current.csrf,
+          );
+        })
         .then((result) => {
           if (!controller.signal.aborted)
             patch(item.id, {

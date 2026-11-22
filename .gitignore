@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+# Personal photos for trying uploads by hand
+/test_photos/
 
 # next.js
 /.next/
