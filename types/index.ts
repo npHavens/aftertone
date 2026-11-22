@@ -44,6 +44,7 @@ export interface ProviderTrack {
   durationMs: number | null;
   url: string | null;
 }
+
 export interface ProviderAlbum {
   id: string;
   service: StreamingService;
@@ -53,6 +54,7 @@ export interface ProviderAlbum {
   url: string | null;
   tracks: ProviderTrack[];
 }
+
 export interface Session {
   authenticated: boolean;
   sessionScope?: string;
@@ -61,12 +63,14 @@ export interface Session {
   capabilities: { spotify: boolean; appleMusic: boolean; recognition: boolean };
   setupRequired: string[];
 }
+
 export interface RecognitionResult {
   outcome: 'needs_review' | 'unrecognized';
   candidates: ProviderAlbum[];
   selected: ProviderAlbum | null;
   evidence: string;
 }
+
 export interface ScanItem {
   id: string;
   file: File;
@@ -77,6 +81,7 @@ export interface ScanItem {
   message: string;
   excludedTrackIds?: string[];
 }
+
 export interface PlaylistOperation {
   id: string;
   status: 'completed' | 'needs_attention' | 'failed' | 'processing';

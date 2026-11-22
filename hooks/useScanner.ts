@@ -14,31 +14,39 @@ export function useScanner(
   const live = useRef<ScanItem[]>([]);
   const controllers = useRef(new Map<string, AbortController>());
   const credentials = useRef({ csrf, enabled });
+
   useEffect(() => {
     credentials.current = { csrf, enabled };
   }, [csrf, enabled]);
+
   const commit = useCallback((next: ScanItem[]) => {
     live.current = next;
     setItems(next);
   }, []);
+
   const patch = useCallback(
     (id: string, change: Partial<ScanItem>) =>
       commit(live.current.map((item) => (item.id === id ? { ...item, ...change } : item))),
     [commit],
   );
+
   const pumpRef = useRef<() => void>(() => {});
+
   const pump = useCallback(() => {
     if (!credentials.current.enabled) return;
+
     for (const item of live.current.filter((item) => item.status === 'queued')) {
       if (controllers.current.size >= 2) break;
       if (controllers.current.has(item.id)) continue;
       const controller = new AbortController();
       controllers.current.set(item.id, controller);
       patch(item.id, { status: 'processing' });
+
       void shrinkImage(item.file, controller.signal)
         .then((photo) => {
           const form = new FormData();
           form.set('file', photo);
+
           return api<RecognitionResult>(
             '/recognize',
             { method: 'POST', body: form, signal: controller.signal },
@@ -64,9 +72,11 @@ export function useScanner(
         });
     }
   }, [patch]);
+
   useEffect(() => {
     pumpRef.current = pump;
   }, [pump]);
+
   const reset = useCallback(() => {
     controllers.current.forEach((controller) => controller.abort());
     controllers.current.clear();
@@ -74,21 +84,27 @@ export function useScanner(
     commit([]);
     setError('');
   }, [commit]);
+
   // Clear provider data before painting another account, and cancel on unmount.
   useLayoutEffect(() => () => reset(), [sessionIdentity, reset]);
+
   const addFiles = (files: File[]) => {
     const messages: string[] = [];
     const added: ScanItem[] = [];
+
     for (const file of files) {
       const issue = validateImage(file);
+
       if (issue) {
         messages.push(issue);
         continue;
       }
+
       if (live.current.length + added.length >= 20) {
         messages.push('Add up to 20 photos per playlist.');
         break;
       }
+
       added.push({
         id: crypto.randomUUID(),
         file,
@@ -100,31 +116,37 @@ export function useScanner(
         message: enabled ? '' : 'Photo added. Search the catalog to choose its album.',
       });
     }
+
     commit([...live.current, ...added]);
     setError(messages.join(' '));
     pump();
   };
+
   const remove = (id: string) => {
     controllers.current.get(id)?.abort();
     const item = live.current.find((item) => item.id === id);
     if (item) URL.revokeObjectURL(item.previewUrl);
     commit(live.current.filter((item) => item.id !== id));
   };
+
   const choose = (id: string, album: ProviderAlbum) => {
     controllers.current.get(id)?.abort();
     patch(id, { album, status: 'confirmed', message: '', excludedTrackIds: [] });
   };
+
   const toggleTrack = (id: string, trackId: string) => {
     const item = live.current.find((item) => item.id === id);
     if (item?.status !== 'confirmed' || !item.album?.tracks.some((track) => track.id === trackId))
       return;
     const excluded = item.excludedTrackIds ?? [];
+
     patch(id, {
       excludedTrackIds: excluded.includes(trackId)
         ? excluded.filter((id) => id !== trackId)
         : [...excluded, trackId],
     });
   };
+
   const retry = (id: string) => {
     if (!credentials.current.enabled) return;
     const item = live.current.find((item) => item.id === id);
@@ -132,6 +154,7 @@ export function useScanner(
     patch(id, { status: 'queued', message: '', album: null, candidates: [] });
     pump();
   };
+
   const move = (id: string, offset: number) => {
     const next = [...live.current];
     const index = next.findIndex((item) => item.id === id);
@@ -140,5 +163,6 @@ export function useScanner(
     [next[index], next[target]] = [next[target], next[index]];
     commit(next);
   };
+
   return { items, error, addFiles, remove, choose, toggleTrack, retry, move, reset };
 }

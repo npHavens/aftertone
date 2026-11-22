@@ -6,6 +6,7 @@ type Context = { params: Promise<{ path: string[] }> };
 
 async function handler(request: Request, context: Context) {
   const { path } = await context.params;
+
   return proxyLocalApi(request, path);
 }
 

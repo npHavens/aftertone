@@ -6,6 +6,7 @@ import type { ProviderAlbum } from '@/types';
 function suggestionMessage(count: number): string {
   if (!count) return '';
   const matches = count === 1 ? '1 possible match' : `${count} possible matches`;
+
   return `${matches} from your photo. Choose one or search.`;
 }
 
@@ -51,13 +52,16 @@ export function MatchSearch({
     setChoosingId(null);
     setAlbums([]);
     setMessage('Searching your music service…');
+
     try {
       const result = await api<{ albums: ProviderAlbum[] }>(
         `/albums/search?q=${encodeURIComponent(trimmed)}`,
         { signal: request.signal },
       );
+
       if (request.signal.aborted) return;
       setAlbums(result.albums);
+
       setMessage(
         result.albums.length
           ? `${result.albums.length} albums found. Choose a match to load its tracks.`
@@ -87,10 +91,12 @@ export function MatchSearch({
     setBusy(true);
     setChoosingId(album.id);
     setMessage(`Loading tracks for ${album.title}…`);
+
     try {
       const selected = await api<ProviderAlbum>(`/albums/${encodeURIComponent(album.id)}`, {
         signal: request.signal,
       });
+
       if (!request.signal.aborted) onChoose(selected);
     } catch (error) {
       if (!request.signal.aborted) setMessage(errorMessage(error));

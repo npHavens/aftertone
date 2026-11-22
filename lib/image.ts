@@ -1,10 +1,12 @@
 // Photos are shrunk before upload, so this only bounds the file the browser has to decode.
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+
 export function validateImage(file: Pick<File, 'type' | 'size' | 'name'>): string | null {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
     return `${file.name}: choose a JPG, PNG, or WebP image.`;
   if (file.size === 0) return `${file.name}: this file is empty.`;
   if (file.size > MAX_IMAGE_BYTES) return `${file.name}: images must be 50 MB or smaller.`;
+
   return null;
 }
 
@@ -20,8 +22,10 @@ export async function shrinkImage(file: File, signal: AbortSignal): Promise<Blob
   const aborted = new Promise<never>((_, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   });
+
   const decoding = createImageBitmap(file, { imageOrientation: 'from-image' }).then((decoded) => {
     if (signal.aborted) decoded.close();
+
     return decoded;
   });
 

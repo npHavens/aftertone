@@ -7,5 +7,6 @@ export async function recognizeCD(usedAlbumIds: Set<string>): Promise<Album> {
 
   const available = MOCK_ALBUMS.filter((a) => !usedAlbumIds.has(a.id));
   const pool = available.length > 0 ? available : MOCK_ALBUMS;
+
   return pool[Math.floor(Math.random() * pool.length)];
 }

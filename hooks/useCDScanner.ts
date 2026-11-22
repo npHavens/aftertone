@@ -35,6 +35,7 @@ export function useCDScanner(
             activeCount.current--;
             const current = getScannedCDs();
             const stillPending = current.filter((c) => c.status === 'pending');
+
             if (stillPending.length > 0 && activeCount.current < MAX_CONCURRENT) {
               processQueue(current);
             }

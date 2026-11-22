@@ -4,6 +4,7 @@ import { useId, useRef, useState } from 'react';
 import { MatchSearch } from './MatchSearch';
 import { serviceLink } from '@/lib/api';
 import type { ScanItem, ProviderAlbum } from '@/types';
+
 interface ReviewAlbumProps {
   item: ScanItem;
   first: boolean;
@@ -15,6 +16,7 @@ interface ReviewAlbumProps {
   onRetry?: () => void;
   onToggleTrack?: (trackId: string) => void;
 }
+
 export function ReviewAlbum({
   item,
   first,
@@ -33,10 +35,12 @@ export function ReviewAlbum({
   const selectedCount = item.album?.tracks.filter((track) => !excludedTracks.has(track.id)).length;
   // Other albums the catalog matched for this photo, offered before any manual search.
   const suggestions = item.candidates.filter((album) => album.id !== item.album?.id);
+
   const closeSearch = () => {
     setSearching(false);
     searchButton.current?.focus();
   };
+
   return (
     <article className="album-review panel">
       <div className="album-review-main">

@@ -13,6 +13,7 @@ interface Props {
 export function PublishResult({ operation, busy, service, onCheck, onNewMix, onEditMix }: Props) {
   const status = operation?.status;
   const link = serviceLink(operation?.playlistUrl);
+
   return (
     <div className={`result ${status === 'completed' ? 'success' : ''}`} role="status">
       <h3>
