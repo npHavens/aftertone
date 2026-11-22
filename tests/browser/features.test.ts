@@ -9,9 +9,11 @@ const origin = process.env.AFTERTONE_TEST_ORIGIN ?? 'http://127.0.0.1:3000';
 const photo = noisyPhoto('cover.png', 1, 1);
 
 let browser: Browser;
+
 before(async () => {
   browser = await chromium.launch({ headless: true });
 });
+
 after(async () => {
   await browser?.close();
 });
@@ -44,6 +46,7 @@ window.MusicKit = {
     },
   }),
 };`;
+
 const developerTokenConfig = {
   developerToken: 'test-developer-token',
   app: { name: 'Aftertone', build: '1' },
@@ -51,9 +54,11 @@ const developerTokenConfig = {
 
 async function newTestContext(): Promise<BrowserContext> {
   const context = await browser.newContext();
+
   await context.route('https://js-cdn.music.apple.com/**', (route) =>
     route.fulfill({ contentType: 'text/javascript', body: musicKitStub }),
   );
+
   return context;
 }
 
@@ -75,10 +80,12 @@ async function fixturePage(
   const context = await newTestContext();
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
+
   // All API traffic is intercepted. These tests cannot write to a user's music account.
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (await overrides(route, path)) return;
+
     if (path === '/api/session') {
       await route.fulfill({ json: sessionJson(service) });
     } else if (path === '/api/auth/apple/developer-token') {
@@ -103,12 +110,15 @@ async function fixturePage(
       });
     }
   });
+
   await page.goto(origin);
+
   await page
     .getByText(`You're connected to ${service === 'spotify' ? 'Spotify' : 'Apple Music'}.`, {
       exact: false,
     })
     .waitFor();
+
   return { page, context };
 }
 
@@ -119,16 +129,20 @@ async function confirmPhoto(page: Page) {
 
 test('failed recognition retries the same photo and displays reviewable tracks', async () => {
   let scans = 0;
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/recognize') return false;
     scans += 1;
     if (scans > 1) return false;
+
     await route.fulfill({
       status: 502,
       json: { code: 'recognition_unavailable', message: 'Recognition temporarily unavailable.' },
     });
+
     return true;
   });
+
   try {
     await page.locator('input[type=file]').setInputFiles(photo);
     await page.getByRole('button', { name: 'Retry recognition' }).click();
@@ -144,15 +158,19 @@ test('failed recognition retries the same photo and displays reviewable tracks',
 
 test('correction searches while typing and Escape restores focus', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await confirmPhoto(page);
     await page.getByRole('button', { name: 'Find another match' }).click();
     await page.getByLabel('Artist or album title').fill('Test artist');
+
     await page
       .getByRole('button', { name: 'Choose Test album by Test artist', exact: true })
       .waitFor();
+
     await page.getByLabel('Artist or album title').press('Escape');
     await page.getByRole('button', { name: 'Close search' }).waitFor({ state: 'hidden' });
+
     assert.equal(
       await page
         .getByRole('button', { name: 'Find another match' })
@@ -167,12 +185,14 @@ test('correction searches while typing and Escape restores focus', async () => {
 for (const service of ['spotify', 'apple-music']) {
   test(`${service}: confirmed album publishes canonical IDs and opens the correct service`, async () => {
     let publishes = 0;
+
     const { page, context } = await fixturePage(async (route, path) => {
       if (path !== '/api/playlists') return false;
       publishes += 1;
       assert.deepEqual(route.request().postDataJSON().trackIds, ['track1']);
       assert.equal(route.request().headers()['x-csrf-token'], 'test-csrf');
       assert.ok(route.request().headers()['idempotency-key']);
+
       await route.fulfill({
         json: {
           id: 'op1',
@@ -184,18 +204,22 @@ for (const service of ['spotify', 'apple-music']) {
               : 'https://music.apple.com/us/playlist/p1',
         },
       });
+
       return true;
     }, service);
+
     try {
       await confirmPhoto(page);
       await page.getByRole('button', { name: 'Make my playlist' }).click();
       await page.getByRole('heading', { name: 'Back in rotation.' }).waitFor();
+
       await page
         .getByRole('link', {
           name: `Open in ${service === 'spotify' ? 'Spotify' : 'Apple Music'}`,
           exact: false,
         })
         .waitFor();
+
       assert.equal(publishes, 1);
     } finally {
       await context.close();
@@ -205,16 +229,21 @@ for (const service of ['spotify', 'apple-music']) {
 
 test('a lost publish response survives reload and reuses the exact request key', async () => {
   const requests: { key: string; body: string }[] = [];
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/playlists') return false;
+
     requests.push({
       key: route.request().headers()['idempotency-key'],
       body: route.request().postData() || '',
     });
+
     if (requests.length === 1) await route.abort('connectionfailed');
     else await route.fulfill({ json: { id: 'recovered-op', status: 'completed', addedCount: 1 } });
+
     return true;
   });
+
   try {
     await confirmPhoto(page);
     await page.getByRole('button', { name: 'Make my playlist' }).click();
@@ -235,12 +264,15 @@ test('a lost publish response survives reload and reuses the exact request key',
 test('a definitive validation rejection keeps the draft editable', async () => {
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/playlists') return false;
+
     await route.fulfill({
       status: 422,
       json: { code: 'invalid_request', message: 'Choose a shorter playlist name.' },
     });
+
     return true;
   });
+
   try {
     await confirmPhoto(page);
     await page.getByRole('button', { name: 'Make my playlist' }).click();
@@ -255,6 +287,7 @@ test('a definitive validation rejection keeps the draft editable', async () => {
 
 test('track exclusions affect publishing and choosing another match resets them', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await confirmPhoto(page);
     await page.getByText('View tracks', { exact: true }).click();
@@ -265,10 +298,12 @@ test('track exclusions affect publishing and choosing another match resets them'
     await page.getByLabel('Artist or album title').fill('Test artist');
     await page.getByRole('button', { name: 'Choose Test album by Test artist' }).click();
     await page.getByRole('button', { name: 'Close search' }).waitFor({ state: 'hidden' });
+
     assert.equal(
       await page.getByRole('checkbox', { name: 'Include First song' }).isChecked(),
       true,
     );
+
     assert.equal(await page.getByRole('button', { name: 'Make my playlist' }).isEnabled(), true);
   } finally {
     await context.close();
@@ -278,19 +313,25 @@ test('track exclusions affect publishing and choosing another match resets them'
 test('processing polls the existing operation without another playlist submission', async () => {
   let publishes = 0;
   let checks = 0;
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path === '/api/playlists') {
       publishes += 1;
       await route.fulfill({ json: { id: 'pending-op', status: 'processing', addedCount: 0 } });
+
       return true;
     }
+
     if (path === '/api/playlist-operations/pending-op') {
       checks += 1;
       await route.fulfill({ json: { id: 'pending-op', status: 'completed', addedCount: 1 } });
+
       return true;
     }
+
     return false;
   });
+
   try {
     await confirmPhoto(page);
     await page.getByRole('button', { name: 'Make my playlist' }).click();
@@ -306,8 +347,10 @@ test('a definite operation failure allows editing without discarding the draft',
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/playlists') return false;
     await route.fulfill({ json: { id: 'failed-op', status: 'failed', addedCount: 0 } });
+
     return true;
   });
+
   try {
     await confirmPhoto(page);
     await page.getByLabel('Playlist name').fill('Evening favorites');
@@ -323,9 +366,11 @@ test('a definite operation failure allows editing without discarding the draft',
 
 test('mobile track selection submits only included tracks without horizontal overflow', async () => {
   let selected: string[] = [];
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path === '/api/recognize') {
       const match = album();
+
       match.tracks.push({
         id: 'track2',
         title: 'Second song',
@@ -333,36 +378,47 @@ test('mobile track selection submits only included tracks without horizontal ove
         durationMs: 200000,
         url: null,
       });
+
       await route.fulfill({
         json: { outcome: 'needs_review', selected: match, candidates: [match] },
       });
+
       return true;
     }
+
     if (path === '/api/playlists') {
       selected = route.request().postDataJSON().trackIds;
       await route.fulfill({ json: { id: 'selected-op', status: 'completed', addedCount: 1 } });
+
       return true;
     }
+
     return false;
   });
+
   try {
     await page.setViewportSize({ width: 390, height: 844 });
     await confirmPhoto(page);
     await page.getByText('View tracks', { exact: true }).click();
     await page.getByRole('checkbox', { name: 'Include Second song' }).uncheck();
     await page.getByText('1 of 2 tracks selected', { exact: false }).waitFor();
+
     const checkboxSize = await page
       .getByRole('checkbox', { name: 'Include Second song' })
       .boundingBox();
+
     assert.ok(checkboxSize && checkboxSize.width <= 24 && checkboxSize.height <= 24);
+
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       true,
     );
+
     await page.screenshot({
       path: 'test-results/aftertone-track-selection-mobile.png',
       fullPage: true,
     });
+
     await page.getByRole('button', { name: 'Make my playlist' }).click();
     await page.getByRole('heading', { name: 'Back in rotation.' }).waitFor();
     assert.deepEqual(selected, ['track1']);
@@ -382,9 +438,11 @@ async function connectionPage(
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
   const state: SignInState = { service: initialService };
+
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (await handle(route, path, state)) return;
+
     if (path === '/api/session') {
       await route.fulfill({ json: sessionJson(state.service) });
     } else if (path === '/api/auth/apple/developer-token') {
@@ -396,8 +454,10 @@ async function connectionPage(
       });
     }
   });
+
   await page.goto(origin);
   await waitForSessionLoaded(page);
+
   return { page, context };
 }
 
@@ -413,12 +473,14 @@ function spotifyReturn(outcome: string) {
     if (path !== '/api/auth/spotify/login') return false;
     if (outcome === 'connected=spotify') state.service = 'spotify';
     await route.fulfill({ status: 302, headers: { location: `${origin}/?${outcome}` } });
+
     return true;
   };
 }
 
 test('spotify: connecting from a signed-out session returns to the connected app', async () => {
   const { page, context } = await connectionPage(spotifyReturn('connected=spotify'));
+
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
@@ -430,6 +492,7 @@ test('spotify: connecting from a signed-out session returns to the connected app
 
 test('a cancelled Spotify connection explains what happened once', async () => {
   const { page, context } = await connectionPage(spotifyReturn('connection=cancelled'));
+
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     const notice = page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' });
@@ -455,7 +518,9 @@ test('every connection outcome the backend or gateway sends has a notice', async
     rate_limited: 'Too many connection attempts.',
     setup: 'Aftertone is not set up to connect this music service.',
   };
+
   const { page, context } = await connectionPage(async () => false);
+
   try {
     for (const [outcome, text] of Object.entries(notices)) {
       await page.goto(`${origin}/?connection=${outcome}`);
@@ -468,13 +533,16 @@ test('every connection outcome the backend or gateway sends has a notice', async
 
 test('a connection notice clears once another service connects', async () => {
   const cancelSpotify = spotifyReturn('connection=cancelled');
+
   const { page, context } = await connectionPage(async (route, path, state) => {
     if (await cancelSpotify(route, path, state)) return true;
     if (path !== '/api/auth/apple/session') return false;
     state.service = 'apple-music';
     await route.fulfill({ json: { authenticated: true, service: 'apple-music' } });
+
     return true;
   });
+
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     const notice = page.getByRole('alert').filter({ hasText: 'Connection was cancelled.' });
@@ -495,6 +563,7 @@ function backFromSpotify(signedIn: boolean) {
     if (path !== '/api/auth/spotify/login') return false;
     if (signedIn) state.service = 'spotify';
     await route.fulfill({ status: 204 });
+
     return true;
   };
 }
@@ -502,6 +571,7 @@ function backFromSpotify(signedIn: boolean) {
 // Playwright's Chromium never restores pages from that cache, so send the event it would fire.
 async function restoreFromBackForwardCache(page: Page) {
   await page.getByRole('button', { name: 'Connect Spotify', disabled: true }).waitFor();
+
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
@@ -509,6 +579,7 @@ async function restoreFromBackForwardCache(page: Page) {
 
 test('a page restored from the back/forward cache re-enables the Connect buttons', async () => {
   const { page, context } = await connectionPage(backFromSpotify(false));
+
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     await restoreFromBackForwardCache(page);
@@ -520,6 +591,7 @@ test('a page restored from the back/forward cache re-enables the Connect buttons
 
 test('a page restored from the back/forward cache shows a sign-in finished meanwhile', async () => {
   const { page, context } = await connectionPage(backFromSpotify(true));
+
   try {
     await page.getByRole('button', { name: 'Connect Spotify' }).click();
     await restoreFromBackForwardCache(page);
@@ -532,22 +604,27 @@ test('a page restored from the back/forward cache shows a sign-in finished meanw
 test('apple-music: connecting hands the MusicKit token to the server', async () => {
   let grant: unknown = null;
   let csrfHeader: string | undefined;
+
   const { page, context } = await connectionPage(async (route, path, state) => {
     if (path !== '/api/auth/apple/session') return false;
     grant = route.request().postDataJSON();
     csrfHeader = route.request().headers()['x-csrf-token'];
     state.service = 'apple-music';
     await route.fulfill({ json: { authenticated: true, service: 'apple-music' } });
+
     return true;
   });
+
   try {
     await page.getByRole('button', { name: 'Connect Apple Music' }).click();
     await page.getByText("You're connected to Apple Music.", { exact: false }).waitFor();
     assert.deepEqual(grant, { musicUserToken: 'test-music-user-token' });
     assert.equal(csrfHeader, 'test-csrf');
+
     const configured = await page.evaluate(
       () => (window as unknown as { musicKitConfig: unknown }).musicKitConfig,
     );
+
     assert.deepEqual(configured, developerTokenConfig);
   } finally {
     await context.close();
@@ -559,14 +636,18 @@ test('apple-music: disconnecting still signs out when MusicKit sign-out fails', 
     if (path !== '/api/session' || route.request().method() !== 'DELETE') return false;
     state.service = null;
     await route.fulfill({ json: { disconnected: true } });
+
     return true;
   }, 'apple-music');
+
   try {
     await page.getByText("You're connected to Apple Music.", { exact: false }).waitFor();
     await page.waitForFunction(() => 'musicKitConfig' in window);
+
     await page.evaluate(() => {
       (window as unknown as { failMusicKitSignOut: boolean }).failMusicKitSignOut = true;
     });
+
     await page.getByRole('button', { name: 'Disconnect' }).click();
     await page.getByRole('button', { name: 'Connect Apple Music' }).waitFor();
     await page.getByText('Apple Music did not finish signing out', { exact: false }).waitFor();
@@ -578,6 +659,7 @@ test('apple-music: disconnecting still signs out when MusicKit sign-out fails', 
 test('alternatives from the photo are offered when the top match did not load', async () => {
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/recognize') return false;
+
     await route.fulfill({
       json: {
         outcome: 'needs_review',
@@ -586,15 +668,19 @@ test('alternatives from the photo are offered when the top match did not load', 
         evidence: 'Test artist — Test album',
       },
     });
+
     return true;
   });
+
   try {
     await page.locator('input[type=file]').setInputFiles(photo);
     await page.getByRole('button', { name: 'Choose a match' }).click();
     await page.getByText('1 possible match from your photo.', { exact: false }).waitFor();
+
     await page
       .getByRole('button', { name: 'Choose Test album by Test artist', exact: true })
       .click();
+
     await page.getByText('View tracks', { exact: true }).waitFor();
   } finally {
     await context.close();
@@ -603,6 +689,7 @@ test('alternatives from the photo are offered when the top match did not load', 
 
 test('a publish the server can no longer report can be acknowledged', async () => {
   let attempts = 0;
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/playlists') return false;
     attempts += 1;
@@ -612,8 +699,10 @@ test('a publish the server can no longer report can be acknowledged', async () =
         status: 410,
         json: { code: 'operation_expired', message: 'This publish record expired.' },
       });
+
     return true;
   });
+
   try {
     await confirmPhoto(page);
     await page.getByRole('button', { name: 'Make my playlist' }).click();
@@ -633,6 +722,7 @@ test('disconnecting after the session expired returns to signed out', async () =
   const { page, context } = await connectionPage(async (route, path, state) => {
     if (path !== '/api/session' || route.request().method() !== 'DELETE') return false;
     state.service = null;
+
     await route.fulfill({
       status: 401,
       json: {
@@ -640,8 +730,10 @@ test('disconnecting after the session expired returns to signed out', async () =
         message: 'Your session expired. Reconnect your music service.',
       },
     });
+
     return true;
   }, 'spotify');
+
   try {
     await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
     await page.getByRole('button', { name: 'Disconnect' }).click();
@@ -654,27 +746,37 @@ test('disconnecting after the session expired returns to signed out', async () =
 test('an older session check never replaces a newer one', async () => {
   const held: Route[] = [];
   let checks = 0;
+
   const { page, context } = await connectionPage(async (route, path, state) => {
     if (path !== '/api/session') return false;
+
     if (route.request().method() === 'DELETE') {
       state.service = null;
       await route.fulfill({ json: { disconnected: true } });
+
       return true;
     }
+
     checks += 1;
+
     if (checks === 2) {
       await route.fulfill({
         status: 503,
         json: { code: 'unavailable', message: 'The connection check failed.' },
       });
+
       return true;
     }
+
     if (checks === 3) {
       held.push(route);
+
       return true;
     }
+
     return false;
   }, 'spotify');
+
   try {
     // A failed check after disconnecting keeps the signed-in page and offers a retry, so retrying
     // and then disconnecting again runs two checks at once.
@@ -693,21 +795,27 @@ test('an older session check never replaces a newer one', async () => {
 
 test('a known operation the server no longer has can be acknowledged', async () => {
   let publishes = 0;
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path === '/api/playlists') {
       publishes += 1;
       await route.fulfill({ json: { id: 'gone-op', status: 'processing', addedCount: 0 } });
+
       return true;
     }
+
     if (path === '/api/playlist-operations/gone-op') {
       await route.fulfill({
         status: 404,
         json: { code: 'not_found', message: 'Publish operation not found.' },
       });
+
       return true;
     }
+
     return false;
   });
+
   try {
     await confirmPhoto(page);
     await page.getByRole('button', { name: 'Make my playlist' }).click();
@@ -733,6 +841,7 @@ async function until(condition: () => boolean) {
   for (let attempt = 0; attempt < 100 && !condition(); attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+
   assert.ok(condition());
 }
 
@@ -742,11 +851,14 @@ function recognized(match = album()) {
 
 test('a late recognition result never restores a removed photo, and queued photos continue', async () => {
   const held: Route[] = [];
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/recognize') return false;
     held.push(route);
+
     return true;
   });
+
   try {
     const photos = ['one.png', 'two.png', 'three.png'].map((name) => ({ ...photo, name }));
     await page.locator('input[type=file]').setInputFiles(photos);
@@ -763,19 +875,24 @@ test('a late recognition result never restores a removed photo, and queued photo
 
 test('a late recognition result never replaces a match chosen by hand', async () => {
   const held: Route[] = [];
+
   const { page, context } = await fixturePage(async (route, path) => {
     if (path !== '/api/recognize') return false;
     held.push(route);
+
     return true;
   });
+
   try {
     await page.locator('input[type=file]').setInputFiles(photo);
     await until(() => held.length === 1);
     await page.getByRole('button', { name: 'Choose a match' }).click();
     await page.getByLabel('Artist or album title').fill('Test artist');
+
     await page
       .getByRole('button', { name: 'Choose Test album by Test artist', exact: true })
       .click();
+
     await page.getByText('Added to your mix').waitFor();
     await release(held, recognized({ ...album(), id: 'album2', title: 'Wrong album' }));
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
@@ -788,16 +905,21 @@ test('a late recognition result never replaces a match chosen by hand', async ()
 
 test('a late recognition result never returns after disconnecting', async () => {
   const held: Route[] = [];
+
   const { page, context } = await connectionPage(async (route, path, state) => {
     if (path === '/api/recognize') {
       held.push(route);
+
       return true;
     }
+
     if (path !== '/api/session' || route.request().method() !== 'DELETE') return false;
     state.service = null;
     await route.fulfill({ json: { disconnected: true } });
+
     return true;
   }, 'spotify');
+
   try {
     await page.getByText("You're connected to Spotify.", { exact: false }).waitFor();
     await page.locator('input[type=file]').setInputFiles(photo);
@@ -819,6 +941,7 @@ function pngChunk(type: string, data: Buffer) {
   const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
   const checksum = Buffer.alloc(4);
   checksum.writeUInt32BE(crc32(body));
+
   return Buffer.concat([length, body, checksum]);
 }
 
@@ -828,12 +951,14 @@ function noisyPhoto(name: string, width: number, height: number) {
   const rows = randomBytes(rowLength * height);
   // Each row starts with its filter type; 0 stores the pixels as they are.
   for (let offset = 0; offset < rows.length; offset += rowLength) rows[offset] = 0;
+
   return pngPhoto(name, width, height, 2, rows); // 8-bit RGB
 }
 
 // Every byte is zero: filter type 0, then pixels with no colour and no opacity.
 function transparentPhoto(name: string, width: number, height: number) {
   const rows = Buffer.alloc((1 + width * 4) * height);
+
   return pngPhoto(name, width, height, 6, rows); // 8-bit RGBA
 }
 
@@ -843,6 +968,7 @@ function pngPhoto(name: string, width: number, height: number, colorType: number
   header.writeUInt32BE(height, 4);
   header.set([8, colorType, 0, 0, 0], 8); // 8 bits per channel, no interlacing
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
   return {
     name,
     mimeType: 'image/png',
@@ -863,8 +989,10 @@ async function recordUploads(page: Page) {
     const recorded: Upload[] = [];
     (window as unknown as { uploads: Upload[] }).uploads = recorded;
     const send = window.fetch;
+
     window.fetch = async (input, init) => {
       const photo = init?.body instanceof FormData ? init.body.get('file') : null;
+
       if (photo instanceof Blob) {
         const upload: Upload = {
           type: photo.type,
@@ -873,6 +1001,7 @@ async function recordUploads(page: Page) {
           height: 0,
           corner: [],
         };
+
         try {
           const bitmap = await createImageBitmap(photo, { imageOrientation: 'from-image' });
           upload.width = bitmap.width;
@@ -886,8 +1015,10 @@ async function recordUploads(page: Page) {
         } catch {
           // An unreadable upload is still recorded, with no size.
         }
+
         recorded.push(upload);
       }
+
       return send(input, init);
     };
   });
@@ -899,6 +1030,7 @@ function uploads(page: Page) {
 
 test('a photo over the upload limit is shrunk to the size Gemini sees before it uploads', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await recordUploads(page);
     const large = noisyPhoto('large.png', 3000, 1600);
@@ -918,8 +1050,10 @@ test('a photo over the upload limit is shrunk to the size Gemini sees before it 
 
 test('a small photo uploads upright at its own size', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await recordUploads(page);
+
     // A 40 × 20 JPEG whose EXIF orientation turns it a quarter turn, made with Pillow.
     const rotated = {
       name: 'rotated.jpg',
@@ -929,6 +1063,7 @@ test('a small photo uploads upright at its own size', async () => {
         'base64',
       ),
     };
+
     await page.locator('input[type=file]').setInputFiles(rotated);
     await page.getByText('Your review needed').waitFor();
     const [upload] = await uploads(page);
@@ -941,13 +1076,16 @@ test('a small photo uploads upright at its own size', async () => {
 
 test('a photo the browser cannot read shows an error and never uploads', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await recordUploads(page);
+
     const broken = {
       name: 'broken.png',
       mimeType: 'image/png',
       buffer: Buffer.from('not a photo'),
     };
+
     await page.locator('input[type=file]').setInputFiles(broken);
     await page.getByText('This file is not a supported, readable image.').waitFor();
     assert.deepEqual(await uploads(page), []);
@@ -958,24 +1096,32 @@ test('a photo the browser cannot read shows an error and never uploads', async (
 
 test('a photo the browser cannot encode shows an error, never uploads, and retries', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await recordUploads(page);
+
     await page.evaluate(() => {
       const encode = OffscreenCanvas.prototype.convertToBlob;
+
       (window as unknown as { restoreEncoder: () => void }).restoreEncoder = () => {
         OffscreenCanvas.prototype.convertToBlob = encode;
       };
+
       OffscreenCanvas.prototype.convertToBlob = () =>
         Promise.reject(new DOMException('Encoding failed.', 'EncodingError'));
     });
+
     await page.locator('input[type=file]').setInputFiles(photo);
     await page.getByText("This photo couldn't be prepared for upload. Please try again.").waitFor();
     assert.deepEqual(await uploads(page), []);
+
     await page.evaluate(() =>
       (window as unknown as { restoreEncoder: () => void }).restoreEncoder(),
     );
+
     await page.getByRole('button', { name: 'Retry recognition' }).click();
     await page.getByText('Your review needed').waitFor();
+
     assert.deepEqual(
       (await uploads(page)).map((upload) => upload.type),
       ['image/jpeg'],
@@ -987,6 +1133,7 @@ test('a photo the browser cannot encode shows an error, never uploads, and retri
 
 test('a long, thin photo keeps at least one pixel on its short side', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await recordUploads(page);
     await page.locator('input[type=file]').setInputFiles(noisyPhoto('thin.png', 1, 5000));
@@ -1000,6 +1147,7 @@ test('a long, thin photo keeps at least one pixel on its short side', async () =
 
 test('a transparent photo uploads on white, not black', async () => {
   const { page, context } = await fixturePage(async () => false);
+
   try {
     await recordUploads(page);
     await page.locator('input[type=file]').setInputFiles(transparentPhoto('clear.png', 8, 8));
@@ -1014,10 +1162,13 @@ test('a transparent photo uploads on white, not black', async () => {
 
 test('removing a photo while it is being shrunk lets the next photo start', async () => {
   let recognitions = 0;
+
   const { page, context } = await fixturePage(async (_route, path) => {
     if (path === '/api/recognize') recognitions += 1;
+
     return false;
   });
+
   try {
     // Holds every decode until the test releases them, so photos stay mid-shrink, and counts
     // how many decoded bitmaps the page frees.
@@ -1025,38 +1176,48 @@ test('removing a photo while it is being shrunk lets the next photo start', asyn
       const state = { held: [] as (() => void)[], closed: 0 };
       (window as unknown as { decodes: typeof state }).decodes = state;
       const decode = window.createImageBitmap.bind(window);
+
       window.createImageBitmap = ((source: ImageBitmapSource, options?: ImageBitmapOptions) =>
         new Promise<ImageBitmap>((resolve, reject) => {
           state.held.push(() => decode(source, options).then(resolve, reject));
         })) as typeof createImageBitmap;
+
       const close = ImageBitmap.prototype.close;
+
       ImageBitmap.prototype.close = function () {
         state.closed += 1;
         close.call(this);
       };
     });
+
     const photos = ['one.png', 'two.png', 'three.png'].map((name) => ({ ...photo, name }));
     await page.locator('input[type=file]').setInputFiles(photos);
+
     const decodes = (count: number) =>
       page.waitForFunction(
         (count) =>
           (window as unknown as { decodes: { held: unknown[] } }).decodes.held.length === count,
         count,
       );
+
     await decodes(2);
     await page.locator('.album-review').first().getByRole('button', { name: 'Remove' }).click();
     // The third photo takes the removed one's place before that decode finishes.
     await decodes(3);
+
     await page.evaluate(() =>
       (window as unknown as { decodes: { held: (() => void)[] } }).decodes.held.forEach((release) =>
         release(),
       ),
     );
+
     await page.getByText('Your review needed').nth(1).waitFor();
+
     // The removed photo's late bitmap is freed too.
     await page.waitForFunction(
       () => (window as unknown as { decodes: { closed: number } }).decodes.closed === 3,
     );
+
     assert.equal(await page.locator('.album-review').count(), 2);
     assert.equal(recognitions, 2);
   } finally {

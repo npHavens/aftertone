@@ -17,6 +17,7 @@ export function usePublishOperation(session: Session | null) {
   const scope = session?.authenticated
     ? `${session.service}:${session.sessionScope || session.csrfToken}`
     : '';
+
   const canPersist = !!session?.sessionScope;
   const csrf = session?.csrfToken;
   const [pending, setPending] = useState<PendingPublish | null>(null);
@@ -32,6 +33,7 @@ export function usePublishOperation(session: Session | null) {
     (value: PendingPublish | null) => {
       current.current = value;
       setPending(value);
+
       try {
         if (value && canPersist) sessionStorage.setItem(publishStorageKey, JSON.stringify(value));
         else sessionStorage.removeItem(publishStorageKey);
@@ -46,20 +48,24 @@ export function usePublishOperation(session: Session | null) {
 
   useEffect(() => {
     let cancelled = false;
+
     void Promise.resolve().then(() => {
       if (cancelled) return;
       let restored = null;
+
       try {
         if (scope && canPersist)
           restored = readPendingPublish(sessionStorage.getItem(publishStorageKey), scope);
       } catch {
         setStorageWarning('Browser storage is unavailable. Keep this tab open while publishing.');
       }
+
       current.current = restored;
       setPending(restored);
       setBusy(false);
       setReadyScope(scope);
     });
+
     return () => {
       cancelled = true;
       request.current?.abort();
@@ -75,6 +81,7 @@ export function usePublishOperation(session: Session | null) {
       setBusy(true);
       setMessage('');
       const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs(value));
+
       try {
         const result = value.operation
           ? await api<PlaylistOperation>(
@@ -91,11 +98,13 @@ export function usePublishOperation(session: Session | null) {
               },
               csrf,
             );
+
         const operation = readPlaylistOperation(result);
         if (!operation) throw new Error('The service returned an unreadable playlist result.');
         if (request.current === controller) save({ ...value, operation });
       } catch (error) {
         if (request.current !== controller) return;
+
         if (
           !value.operation &&
           error instanceof ApiError &&
@@ -110,12 +119,14 @@ export function usePublishOperation(session: Session | null) {
           const reason = controller.signal.aborted
             ? 'The music service is taking longer than expected.'
             : errorMessage(error);
+
           setMessage(
             `${reason} The outcome is not confirmed. Check the same request before making another playlist.`,
           );
         }
       } finally {
         window.clearTimeout(timeout);
+
         if (request.current === controller) {
           request.current = null;
           setBusy(false);
@@ -131,17 +142,21 @@ export function usePublishOperation(session: Session | null) {
 
   const operationId = pending?.operation?.id;
   const operationStatus = pending?.operation?.status;
+
   useEffect(() => {
     if (operationStatus !== 'processing') return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     let remaining = 10;
+
     const poll = async () => {
       if (cancelled) return;
       await check();
       if (!cancelled && --remaining > 0) timer = setTimeout(() => void poll(), 2000);
     };
+
     timer = setTimeout(() => void poll(), 2000);
+
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -151,12 +166,14 @@ export function usePublishOperation(session: Session | null) {
   async function publish(name: string, trackIds: string[]) {
     if (!ready || !scope || current.current || request.current || !name.trim() || !trackIds.length)
       return;
+
     const value = {
       scope,
       key: crypto.randomUUID(),
       body: JSON.stringify({ name: name.trim(), trackIds }),
       operation: null,
     };
+
     save(value);
     await send(value, false);
   }
@@ -174,6 +191,7 @@ export function usePublishOperation(session: Session | null) {
       return false;
     save(null);
     setMessage('');
+
     return true;
   }
 

@@ -25,6 +25,7 @@ const INITIAL_STATE: PlaylistState = {
 export function usePlaylist() {
   const [state, setReactState] = useState<PlaylistState>(INITIAL_STATE);
   const stateRef = useRef(state);
+
   const setState = useCallback((update: (previous: PlaylistState) => PlaylistState) => {
     const next = update(stateRef.current);
     stateRef.current = next;
@@ -48,10 +49,12 @@ export function usePlaylist() {
   const addFiles = useCallback(
     (files: File[]) => {
       const newCDs = files.map(createScannedCD);
+
       setState((prev) => ({
         ...prev,
         scannedCDs: [...prev.scannedCDs, ...newCDs],
       }));
+
       startScanning();
     },
     [startScanning, setState],
@@ -62,6 +65,7 @@ export function usePlaylist() {
       setState((prev) => {
         const cd = prev.scannedCDs.find((c) => c.id === id);
         if (cd?.previewUrl) URL.revokeObjectURL(cd.previewUrl);
+
         return {
           ...prev,
           scannedCDs: prev.scannedCDs.filter((c) => c.id !== id),
@@ -80,6 +84,7 @@ export function usePlaylist() {
 
   const createPlaylist = useCallback(() => {
     setState((prev) => ({ ...prev, isCreating: true }));
+
     setTimeout(() => {
       setState((prev) => ({ ...prev, isCreating: false, isSuccess: true }));
     }, 1500);
@@ -94,12 +99,14 @@ export function usePlaylist() {
       prev.scannedCDs.forEach((cd) => {
         if (cd.previewUrl) URL.revokeObjectURL(cd.previewUrl);
       });
+
       return INITIAL_STATE;
     });
   }, [setState]);
 
   const detectedAlbums = state.scannedCDs.filter((cd) => cd.status === 'done' && cd.album);
   const totalTracks = detectedAlbums.reduce((sum, cd) => sum + (cd.album?.tracks.length ?? 0), 0);
+
   const totalDuration = detectedAlbums.reduce(
     (sum, cd) => sum + (cd.album?.totalDurationSeconds ?? 0),
     0,

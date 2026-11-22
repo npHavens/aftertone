@@ -64,6 +64,7 @@ test('unreadable success responses are not accepted as a confirmed operation', (
   ]) {
     assert.equal(readPlaylistOperation(value), null);
   }
+
   const operation = { id: 'op-1', status: 'completed', addedCount: 2 };
   assert.deepEqual(readPlaylistOperation(operation), operation);
 });
@@ -71,6 +72,7 @@ test('unreadable success responses are not accepted as a confirmed operation', (
 test('publish waits longer for larger playlists but stays under the gateway limit', () => {
   const body = (count: number) =>
     JSON.stringify({ name: 'Mix', trackIds: Array.from({ length: count }, (_, i) => `t${i}`) });
+
   assert.equal(publishTimeoutMs(body(1)), 20_150);
   assert.ok(publishTimeoutMs(body(200)) > publishTimeoutMs(body(20)));
   assert.equal(publishTimeoutMs(body(2000)), 110_000);

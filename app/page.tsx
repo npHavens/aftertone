@@ -27,11 +27,13 @@ declare global {
 
 export default function Home() {
   const { session, refresh, error: sessionError, loading } = useSession();
+
   const scanner = useScanner(
     session?.csrfToken,
     !!session?.authenticated && !!session.capabilities.recognition,
     session?.authenticated ? JSON.stringify([session.service, session.sessionScope]) : null,
   );
+
   const [notice, setNotice] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [kitLoaded, setKitLoaded] = useState(false);
@@ -41,18 +43,24 @@ export default function Home() {
   const { operation, busy: publishing, locked } = publisher;
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+
   const albums = scanner.items
     .filter((item) => item.status === 'confirmed' && item.album)
     .map((item) => item.album!);
+
   const trackIds = selectedTrackIds(scanner.items);
+
   const frozenDraft = publisher.pending
     ? (JSON.parse(publisher.pending.body) as { name: string; trackIds: string[] })
     : null;
+
   const unresolved = scanner.items.some((item) => item.status !== 'confirmed');
   const service = session?.service === 'apple-music' ? 'Apple Music' : 'Spotify';
+
   useEffect(() => {
     if (!kitLoaded || !session?.capabilities.appleMusic) return;
     let cancelled = false;
+
     void api<{ developerToken: string; app: { name: string; build: string } }>(
       '/auth/apple/developer-token',
     )
@@ -63,10 +71,12 @@ export default function Home() {
       .catch((error) => {
         if (!cancelled) setNotice(errorMessage(error));
       });
+
     return () => {
       cancelled = true;
     };
   }, [kitLoaded, session?.capabilities.appleMusic]);
+
   useEffect(() => {
     // Back from Spotify's sign-in page can restore this page from the back/forward cache with
     // the Connect buttons still disabled and the session from before any sign-in there.
@@ -75,21 +85,27 @@ export default function Home() {
       setConnecting(false);
       void refresh();
     }
+
     window.addEventListener('pageshow', resetRestoredPage);
+
     return () => window.removeEventListener('pageshow', resetRestoredPage);
   }, [refresh]);
+
   async function connectApple() {
     if (!window.MusicKit || !kitReady || connecting) return;
     setConnecting(true);
     setNotice('');
+
     try {
       const tokenPromise = window.MusicKit.getInstance().authorize();
       const musicUserToken = await tokenPromise;
+
       await api(
         '/auth/apple/session',
         { method: 'POST', body: JSON.stringify({ musicUserToken }) },
         session?.csrfToken,
       );
+
       await refresh();
     } catch (error) {
       setNotice(errorMessage(error));
@@ -97,23 +113,29 @@ export default function Home() {
       setConnecting(false);
     }
   }
+
   async function disconnect() {
     if (
       scanner.items.length &&
       !window.confirm('Disconnect and clear the album selections? Your playlist name will be kept.')
     )
       return;
+
     try {
       await api('/session', { method: 'DELETE' }, session?.csrfToken);
     } catch (error) {
       // An expired session is already disconnected on the server, so carry on to sign out locally.
       const alreadySignedOut = error instanceof ApiError && error.status === 401;
+
       if (!alreadySignedOut) {
         setNotice(errorMessage(error));
+
         return;
       }
     }
+
     scanner.reset();
+
     // The server session is already gone, so refresh even if MusicKit's own sign-out fails.
     if (session?.service === 'apple-music') {
       try {
@@ -124,11 +146,14 @@ export default function Home() {
         );
       }
     }
+
     await refresh();
   }
+
   const add = (files: File[]) => {
     if (session?.authenticated && !locked) scanner.addFiles(files);
   };
+
   return (
     <div className="app-shell">
       {session?.capabilities.appleMusic && (

@@ -20,9 +20,11 @@ export function SuccessModal({
 }: SuccessModalProps) {
   useEffect(() => {
     let confetti: typeof import('canvas-confetti') | null = null;
+
     const timer = setTimeout(async () => {
       const mod = await import('canvas-confetti');
       confetti = mod.default;
+
       confetti({
         particleCount: 120,
         spread: 70,
@@ -30,6 +32,7 @@ export function SuccessModal({
         colors: ['#f59e0b', '#d97706', '#fbbf24', '#fef3c7', '#ffffff'],
       });
     }, 300);
+
     return () => clearTimeout(timer);
   }, []);
 

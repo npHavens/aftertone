@@ -24,12 +24,15 @@ function ReturnNotice({ connected }: Props) {
   const params = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+
   // Read once, because the parameter is removed below so that a reload doesn't repeat it.
   const [message, setMessage] = useState(() =>
     connectionMessages.get(params.get('connection') ?? ''),
   );
+
   // A later connection makes the notice out of date, and it stays dismissed after disconnecting.
   if (connected && message) setMessage(undefined);
+
   useEffect(() => {
     if (!params.has('connection')) return;
     // Through the router, not history.replaceState: on the first render this effect runs before
@@ -39,13 +42,16 @@ function ReturnNotice({ connected }: Props) {
     const search = remaining.toString();
     router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
   }, [params, pathname, router]);
+
   if (!message) return null;
+
   return (
     <div className="alert" role="alert">
       {message}
     </div>
   );
 }
+
 export function ConnectionReturnNotice({ connected }: Props) {
   return (
     <Suspense fallback={null}>
