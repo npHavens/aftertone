@@ -1,6 +1,7 @@
 import type { PlaylistOperation } from '../types/index.ts';
 
 export const publishStorageKey = 'aftertone.pending-publish.v1';
+
 export interface PendingPublish {
   scope: string;
   key: string;
